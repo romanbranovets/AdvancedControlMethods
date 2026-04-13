@@ -9,10 +9,13 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.patches import Polygon
+from matplotlib.patches import Circle, Polygon
 
 # Импортируем симулятор и контроллеры
-from simulation import TrackedRobotSim, go_to_pose_controller
+try:
+    from .simulation import TrackedRobotSim, go_to_pose_controller
+except ImportError:  # pragma: no cover
+    from simulation import TrackedRobotSim, go_to_pose_controller
 
 
 class Visualizer:
@@ -22,6 +25,7 @@ class Visualizer:
         self,
         sim: TrackedRobotSim,
         goal: np.ndarray | list[float] | None = None,
+        obstacles: list[tuple[float, float, float]] | tuple[tuple[float, float, float], ...] | None = None,
         title: str = "Движение гусеничного робота к цели (две гусеницы)",
         figsize: tuple[float, float] = (12, 8),
         show_controls: bool = True,
@@ -45,12 +49,15 @@ class Visualizer:
         self.hist = sim.history          # (N, 3) → [x, y, theta]
         self.controls = sim.controls     # (N-1, 2) → [v_left, v_right]
         self.times = sim.times
+        self.targets = sim.targets
+        self.modes = sim.modes
 
         self.goal = (
             np.asarray(goal, dtype=float).reshape(2)
             if goal is not None
             else np.array([10.0, 5.0])
         )
+        self.obstacles = tuple(obstacles or ())
         self.title = title
         self.figsize = figsize
         self.show_controls = show_controls
@@ -65,6 +72,7 @@ class Visualizer:
         interval: int | None = None,
         repeat: bool = True,
         realtime: bool = True,
+        close_on_finish: bool = False,
     ) -> FuncAnimation:
         """
         Запуск анимации.
@@ -73,6 +81,7 @@ class Visualizer:
             interval   — задержка между кадрами в мс (None = реальное время)
             repeat     — зацикливать анимацию
             realtime   — использовать реальное время симуляции (dt)
+            close_on_finish — закрыть окно после последнего кадра
 
         Возвращает: FuncAnimation (можно сохранить: ani.save(...))
         """
@@ -93,6 +102,19 @@ class Visualizer:
             self.goal[0], self.goal[1], "r*", markersize=22, label="Цель", zorder=5
         )
 
+        for index, (x_obs, y_obs, r_obs) in enumerate(self.obstacles):
+            obstacle_patch = Circle(
+                (x_obs, y_obs),
+                r_obs,
+                facecolor="gray",
+                edgecolor="black",
+                alpha=0.35,
+                linewidth=1.5,
+                label="Препятствие" if index == 0 else None,
+                zorder=3,
+            )
+            self.ax.add_patch(obstacle_patch)
+
         # Начальная позиция
         self.ax.plot(
             self.hist[0, 0],
@@ -106,6 +128,37 @@ class Visualizer:
         # Пройденный путь
         (self.path_line,) = self.ax.plot(
             [], [], "b-", linewidth=3, label="Пройденный путь", alpha=0.85, zorder=4
+        )
+
+        if len(self.targets) > 0:
+            avoidance_targets = [
+                target
+                for target, mode in zip(self.targets, self.modes)
+                if mode == "obstacle_avoidance"
+            ]
+            if avoidance_targets:
+                unique_targets = np.unique(np.round(np.vstack(avoidance_targets), 3), axis=0)
+                self.ax.scatter(
+                    unique_targets[:, 0],
+                    unique_targets[:, 1],
+                    marker="x",
+                    s=90,
+                    c="orange",
+                    linewidths=2.0,
+                    label="Промежуточные точки",
+                    zorder=6,
+                )
+
+        (self.current_target_marker,) = self.ax.plot(
+            [],
+            [],
+            marker="o",
+            markersize=9,
+            color="orange",
+            markeredgecolor="black",
+            linestyle="None",
+            label="Текущая точка обхода",
+            zorder=7,
         )
 
         # Геометрия робота
@@ -170,6 +223,17 @@ class Visualizer:
                 self.hist[: frame + 1, 0], self.hist[: frame + 1, 1]
             )
 
+            target_index = min(frame, len(self.targets) - 1)
+            if (
+                len(self.targets) > 0
+                and target_index >= 0
+                and self.modes[target_index] == "obstacle_avoidance"
+            ):
+                target = self.targets[target_index]
+                self.current_target_marker.set_data([target[0]], [target[1]])
+            else:
+                self.current_target_marker.set_data([], [])
+
             # Заголовок
             if self.show_controls and frame < len(self.controls):
                 vl, vr = self.controls[frame]
@@ -182,6 +246,11 @@ class Visualizer:
                 title_str = f"{self.title}\n t = {self.times[frame]:.2f} с"
 
             self.ax.set_title(title_str, fontsize=14)
+            if close_on_finish and not repeat and frame == len(self.hist) - 1:
+                self.fig.canvas.new_timer(
+                    interval=max(100, interval),
+                    callbacks=[(plt.close, [self.fig], {})],
+                ).start()
 
             return (
                 self.path_line,
@@ -189,6 +258,7 @@ class Visualizer:
                 self.left_track_patch,
                 self.right_track_patch,
                 self.heading_line,
+                self.current_target_marker,
             )
 
         # Создаём анимацию
