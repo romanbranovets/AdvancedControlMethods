@@ -1,3 +1,8 @@
+"""
+simulation.py
+Модуль симуляции гусеничного робота (дифференциальный привод)
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,7 +14,10 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Polygon
 from IPython.display import HTML
 
-from utils import _wrap_angle
+
+def _wrap_angle(theta: float) -> float:
+    """Приводит угол к диапазону [-π, π]"""
+    return (theta + np.pi) % (2 * np.pi) - np.pi
 
 
 def constant_command(v_l: float, v_r: float) -> Callable[[float, np.ndarray], np.ndarray]:
@@ -65,7 +73,7 @@ def go_to_pose_controller(
     return f
 
 
-@dataclass(slots=True)
+@dataclass
 class TrackedRobotSim:
     dt: float = 0.05
 
