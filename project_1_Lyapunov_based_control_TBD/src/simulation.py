@@ -86,6 +86,8 @@ class TrackedRobotSim:
     _history: list[np.ndarray] = field(default_factory=list)
     _controls: list[np.ndarray] = field(default_factory=list)
     _times: list[float] = field(default_factory=list)
+    _targets: list[np.ndarray] = field(default_factory=list)
+    _modes: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.state = np.asarray(self.state, dtype=float).reshape(-1)
@@ -117,6 +119,46 @@ class TrackedRobotSim:
     def pose(self) -> np.ndarray:
         return self.state.copy()
 
+    @property
+    def targets(self) -> np.ndarray:
+        return np.vstack(self._targets) if self._targets else np.empty((0, 2))
+
+    @property
+    def modes(self) -> tuple[str, ...]:
+        return tuple(self._modes)
+
+    def record_controller_debug(self, target: Iterable[float], mode: str) -> None:
+        """Record controller target data for visualization."""
+        target_xy = np.asarray(target, dtype=float).reshape(2)
+        self._targets.append(target_xy.copy())
+        self._modes.append(str(mode))
+
+    def _body_polygons(self, state: np.ndarray | Iterable[float]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return body, left-track, and right-track polygons for visualization."""
+        x, y, th = np.asarray(state, dtype=float).reshape(3)
+        c = np.cos(th)
+        s = np.sin(th)
+        rot = np.array([[c, -s], [s, c]], dtype=float)
+        origin = np.array([x, y], dtype=float)
+
+        def rectangle(length: float, width: float, center_y: float = 0.0) -> np.ndarray:
+            local = np.array(
+                [
+                    [0.5 * length, 0.5 * width + center_y],
+                    [0.5 * length, -0.5 * width + center_y],
+                    [-0.5 * length, -0.5 * width + center_y],
+                    [-0.5 * length, 0.5 * width + center_y],
+                ],
+                dtype=float,
+            )
+            return local @ rot.T + origin
+
+        track_offset = 0.5 * (self.track_gap + self.track_width)
+        body = rectangle(self.body_length, self.body_width)
+        left_track = rectangle(self.track_length, self.track_width, track_offset)
+        right_track = rectangle(self.track_length, self.track_width, -track_offset)
+        return body, left_track, right_track
+
     def reset(self, state: np.ndarray | Iterable[float] = (0.0, 0.0, 0.0)) -> np.ndarray:
         self.state = np.asarray(state, dtype=float).reshape(-1)
         if self.state.shape != (3,):
@@ -126,6 +168,8 @@ class TrackedRobotSim:
         self._history = [self.state.copy()]
         self._controls = []
         self._times = [0.0]
+        self._targets = []
+        self._modes = []
         return self.state.copy()
 
     def step_tracks(self, v_l: float, v_r: float) -> np.ndarray:
