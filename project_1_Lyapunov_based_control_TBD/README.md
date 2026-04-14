@@ -1,37 +1,42 @@
-# Lyapunov-Based Control for a Tracked Robot
+# Lyapunov Control for a Tracked Robot
 
 ---
 
 ## 4.1 Problem Definition
 
 **Control problem:**  
-Design a feedback controller that drives a tracked robot from an initial pose $(x, y, \theta)$ to a goal position $(x_g, y_g)$ while avoiding obstacles.
+Design a feedback controller that drives a tracked robot from an initial pose $(x, y, \theta)$ to a goal position $(x_g, y_g)$ in a 2D environment, with optional obstacle avoidance via intermediate waypoints.
 
 **Plant / environment:**  
-- 2D planar environment  
-- Static circular obstacles  
+- 2D planar workspace  
+- Static circular obstacles (optional)  
 - Fully observable state  
 
 **Assumptions / context:**
-- Ideal kinematics (no slip, no delays)  
-- Obstacles are known and static  
-- No disturbances or noise  
-- Goal is fixed  
+- Kinematic model (no slip dynamics, no inertia effects)  
+- No noise or disturbances  
+- Goal is fixed during execution  
+- Local (reactive) decision making  
 
-**Class of methods:**  
-- Nonlinear control  
-- Lyapunov-based stabilization  
-- Reactive obstacle avoidance  
+**Class of methods:**
+- Nonlinear feedback control  
+- Lyapunov stabilization  
+- Reactive waypoint-based obstacle avoidance  
 
 ---
 
 ## 4.2 System Description
 
 **System:**  
-Tracked robot modeled as a unicycle.
+Tracked robot modeled as a unicycle with differential tracks.
 
 **Visualization:**  
-Animation implemented in `visualization.py` (robot body, tracks, trajectory, obstacles, waypoints).
+Implemented in `visualization.py`:
+- robot body
+- left/right tracks
+- trajectory
+- goal marker
+- optional intermediate targets
 
 ---
 
@@ -41,33 +46,32 @@ $$
 \mathbf{x} = (x, y, \theta)
 $$
 
-- $x, y$ — position  
-- $\theta$ — heading  
+- $x, y$ — planar position  
+- $\theta$ — heading angle  
 
 ---
 
 ### Control inputs
 
 Unicycle form:
+
 $$
 (v, \omega)
 $$
 
 Track velocities:
+
 $$
 (u_L, u_R)
 $$
 
 Conversion:
+
 $$
-v = \frac{u_L + u_R}{2}, \quad \omega = \frac{u_R - u_L}{b}
+v = \frac{u_L + u_R}{2}, \quad \omega = \frac{u_R - u_R}{b}
 $$
 
----
-
-### Unknown parameters
-
-None.
+where $b$ is track separation width.
 
 ---
 
@@ -78,6 +82,7 @@ $$
 $$
 
 Goal condition:
+
 $$
 \sqrt{(x - x_g)^2 + (y - y_g)^2} \leq \epsilon
 $$
@@ -102,111 +107,94 @@ $$
 
 ## 4.3 Mathematical Specification
 
-Define goal:
+### Goal
+
 $$
 (x_g, y_g)
 $$
 
-Distance to goal:
+### Distance to goal
+
 $$
 \rho = \sqrt{(x_g - x)^2 + (y_g - y)^2}
 $$
 
-Heading error:
+### Heading error
+
 $$
-\alpha = \text{wrap}(\arctan2(y_g - y, x_g - x) - \theta)
+\alpha = \mathrm{wrap}\big(\arctan2(y_g - y, x_g - x) - \theta\big)
 $$
 
 ---
 
-### Lyapunov function
+### Control law (Lyapunov)
 
 $$
-V = \frac{1}{2} \rho^2 + c (1 - \cos \alpha)
+v = k_{\rho} \cdot \rho \cdot \cos(\alpha)
 $$
 
-where $c > 0$.
+$$
+\omega = k_{\alpha} \cdot \sin(\alpha)
+$$
+
+where:
+- $k_{\rho} > 0$
+- $k_{\alpha} > 0$
 
 ---
 
-### Control law
-
-$$
-v = k_\rho \cdot \rho \cdot \cos(\alpha)
-$$
-
-$$
-\omega = k_\alpha \cdot \sin(\alpha)
-$$
-
-Conditions:
-- $k_\rho > 0$  
-- $k_\alpha > k_\rho$  
-
----
-
-### Notation consistency
+### Notation
 
 - $\rho$ — distance to target  
 - $\alpha$ — heading error  
-- $V$ — Lyapunov function  
-- $v, \omega$ — control inputs
+- $v$ — linear velocity  
+- $\omega$ — angular velocity  
 
 ---
 
 ## 4.4 Method Description
 
-**Method:** Lyapunov-based point stabilization with waypoint switching.
+The method is a **Lyapunov nonlinear feedback controller** combined with **reactive waypoint selection**.
 
 ---
 
-### Idea
+### Core idea
 
-1. Define Lyapunov function $V$  
-2. Choose control inputs so that $\dot{V} \leq 0$  
-3. Switch target when obstacles block direct path  
+1. Compute error to target $(\rho, \alpha)$  
+2. Apply nonlinear feedback law  
+3. If direct path is blocked, switch to intermediate waypoint  
+4. Otherwise track goal directly  
 
 ---
 
-### Stability
+### Stability (practical interpretation)
 
-$$
-\dot{V} \leq 0
-$$
-
-Ensures convergence to the goal in obstacle-free case.
+- In obstacle-free case, system empirically converges to goal  
+- No formal proof of global stability is implemented  
+- Behavior is consistent with Lyapunov design  
 
 ---
 
 ### Obstacle avoidance
 
-- Detect intersection between straight path and obstacle  
-- Generate candidate waypoints:
-  - tangent points  
-  - side bypass points  
-- Select best feasible waypoint  
-
----
-
-### Additional mechanisms
-
-- Hysteresis (prevents oscillations)  
-- Stall detection (switch direction if stuck)  
-- Safety recovery (escape if inside obstacle)  
+If obstacles are present:
+- system selects intermediate targets stored in `sim.targets`
+- mode `obstacle_avoidance` activates waypoint tracking
+- robot switches back to goal when path is clear
 
 ---
 
 ### Approximations
 
-- Kinematic model only  
-- Circular obstacles  
-- Local (reactive) planning  
+- Pure kinematic model  
+- No dynamic friction/slip modeling  
+- Reactive (no global planner)
 
 ---
 
 ## 4.5 Algorithm Listing
 
-### Algorithm
+### Pipeline
 
 1. Initialize state $(x, y, \theta)$, goal, and obstacles.
 
@@ -214,13 +202,13 @@ Ensures convergence to the goal in obstacle-free case.
 
    a. Read current state.
 
-   b. Detect blocking obstacle.
+   b. Check for obstacle influence (if any).
 
    c. Select target:
       - goal, or  
-      - avoidance waypoint.
+      - intermediate waypoint
 
-   d. Compute:
+   d. Compute errors:
       - $\rho$ — distance to target  
       - $\alpha$ — heading error  
 
@@ -230,47 +218,47 @@ Ensures convergence to the goal in obstacle-free case.
 
    f. Convert $(v, \omega) \rightarrow (u_L, u_R)$.
 
-   g. Apply saturation.
+   g. Apply saturation constraints.
 
-   h. Update state using dynamics.
+   h. Update system state using kinematics.
 
-3. Stop when goal is reached.
-
+3. Stop when:
+   $$
+   \rho \leq \epsilon
+   $$
 
 ---
 
 ## 4.6 Experimental Setup
 
-**Initial conditions:**  
-- Random or fixed $(x, y, \theta)$  
+**Initial conditions:**
+- $(x, y, \theta)$ = $(0, 0, 0)$ (default)
 
-**Reference:**  
-- Goal $(x_g, y_g)$  
+**Goal:**
+- $(x_g, y_g)$ = $(10, 5)$
 
-**Simulation:**  
-- $dt = 0.05$  
-- steps = 2000  
+**Simulation parameters:**
+- $dt = 0.05$
+- steps = 1200
 
-**Controller parameters:**  
-- $k_\rho = 0.8$  
-- $k_\alpha = 4.0$  
+**Controller parameters:**
+- $k_{\rho} = 1.8$
+- $k_{\alpha} = 4.2$
 
-**Environment:**  
-- 2–5 obstacles  
-- radius: 0.35–0.9  
+**Environment:**
+- optional circular obstacles
+- optional intermediate waypoints
 
-**Disturbances:**  
-- None  
+**Disturbances:**
+- none
 
 ---
 
 ## 4.7 Reproducibility
 
-To fully reproduce the simulation results, plots, and animation, follow the steps below.
+### Installation
 
-The project uses `pyproject.toml` and `uv.lock` for dependency management.
-
-Install all dependencies with:
+The project uses `pyproject.toml` and `uv.lock`:
 
 ```bash
 uv sync
