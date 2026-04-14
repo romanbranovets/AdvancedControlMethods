@@ -5,9 +5,11 @@ from typing import Iterable
 
 import numpy as np
 
-from configs import DEFAULT_CONFIG, RandomScenarioConfig
-from src.controller import LyapunovTrackedRobotController
+from configs import DEFAULT_CONFIG, CannonConfig, NoiseConfig, RandomScenarioConfig
+from src.cannon import Cannon, Projectile
+from src.controller import LyapunovTrackedRobotController, MovingObstacle
 from src.simulation import TrackedRobotSim
+from src.system import add_measurement_noise
 from src.visualization import Visualizer
 
 CFG = DEFAULT_CONFIG
@@ -231,6 +233,8 @@ def run(
     command_mode: str = CFG.simulation.command_mode,
     stop_at_goal: bool = CFG.simulation.stop_at_goal,
     goal_tolerance: float = CFG.simulation.goal_tolerance,
+    noise_config: NoiseConfig = CFG.noise,
+    cannon_config: CannonConfig = CFG.cannon,
     render: bool = False,
     render_every: int = CFG.render_every,
 ) -> TrackedRobotSim:
@@ -259,31 +263,120 @@ def run(
         visibility_samples_per_obstacle=visibility_samples_per_obstacle,
         planner_clearance=planner_clearance,
         waypoint_reached_radius=waypoint_reached_radius,
+        dodge_lookahead=cannon_config.dodge_lookahead,
+        dodge_escape_distance=cannon_config.dodge_escape_distance,
+        dodge_danger_factor=cannon_config.dodge_danger_factor,
         output_mode=command_mode,
     )
 
+    # --- Cannon setup ---
+    cannon: Cannon | None = None
+    if cannon_config.enabled:
+        cannon = Cannon(
+            x=cannon_config.x,
+            y=cannon_config.y,
+            mean_fire_interval=cannon_config.mean_fire_interval,
+            projectile_speed=cannon_config.projectile_speed,
+            projectile_radius=cannon_config.projectile_radius,
+            angular_spread_std=cannon_config.angular_spread_std,
+            max_projectile_age=cannon_config.max_projectile_age,
+            rng=np.random.default_rng(cannon_config.seed),
+        )
+        print(
+            f"[Cannon] enabled at ({cannon_config.x}, {cannon_config.y}) | "
+            f"mean interval={cannon_config.mean_fire_interval}s | "
+            f"speed={cannon_config.projectile_speed} m/s | "
+            f"seed={cannon_config.seed}"
+        )
+
+    # --- Noise RNG and EMA filter ---
+    # EMA (exponential moving average) smooths noisy measurements before they
+    # reach the controller, preventing high-frequency chatter near the goal.
+    # α_ema close to 1 → fast tracking; close to 0 → heavy smoothing.
+    _EMA_ALPHA = 0.55
+    noise_rng: np.random.Generator | None = None
+    if noise_config.enabled:
+        noise_rng = np.random.default_rng(noise_config.seed)
+
+    active_projectiles: list[Projectile] = []
     state = sim.reset(initial_state)
     goal_xy = np.asarray(goal, dtype=float).reshape(2)
+    filtered_state: np.ndarray = state.copy()   # EMA state; initialised to true state
+
     for _ in range(num_steps):
-        if hasattr(ctrl, "get_control_with_debug"):
-            u_l, u_r, debug = ctrl.get_control_with_debug(state)
-            action = np.array([u_l, u_r], dtype=float)
-            if command_mode == "vw":
-                action = np.array([debug.v, debug.omega], dtype=float)
-            sim.record_controller_debug(debug.current_target, debug.mode)
+        # 1. Cannon fires (Poisson process)
+        if cannon is not None:
+            new_proj = cannon.update(dt, sim.t, state[:2])
+            if new_proj is not None:
+                active_projectiles.append(new_proj)
+                print(
+                    f"  [Cannon] Shot #{cannon.shot_count} at t={sim.t:.2f}s | "
+                    f"angle={np.degrees(cannon.fire_log[-1]['fire_angle_rad']):.1f}° | "
+                    f"noise={np.degrees(cannon.fire_log[-1]['noise_angle_rad']):.1f}°"
+                )
+
+        # 2. Advance projectiles
+        for proj in active_projectiles:
+            proj.step(dt, sim.xlim, sim.ylim, cannon_config.max_projectile_age)
+        active_projectiles = [p for p in active_projectiles if p.alive]
+
+        # 3. Record projectile snapshot for this step
+        sim.record_projectile_snapshot(
+            [(p.x, p.y, p.radius) for p in active_projectiles]
+        )
+
+        # 4. Apply measurement noise then EMA low-pass filter.
+        #    The simulator always integrates the *true* state; only the
+        #    controller input is noisy + filtered.
+        if noise_rng is not None:
+            noisy_state = add_measurement_noise(
+                state, noise_config.position_std, noise_config.heading_std, noise_rng
+            )
         else:
-            t = sim.t
-            action = ctrl(t, state)
+            noisy_state = state
+
+        # EMA update (linear blend; angle wrap applied to θ component)
+        filtered_state = _EMA_ALPHA * noisy_state + (1.0 - _EMA_ALPHA) * filtered_state
+        filtered_state[2] = float(
+            (filtered_state[2] + np.pi) % (2.0 * np.pi) - np.pi
+        )
+        observed_state = filtered_state
+
+        # 5. Build moving-obstacle list from active projectiles
+        moving_obs = [
+            MovingObstacle(p.x, p.y, p.vx, p.vy, p.radius)
+            for p in active_projectiles
+        ]
+
+        # 6. Compute control
+        u_l, u_r, debug = ctrl.get_control_with_debug(
+            observed_state, moving_obstacles=moving_obs
+        )
+        action = np.array([u_l, u_r], dtype=float)
+        if command_mode == "vw":
+            action = np.array([debug.v, debug.omega], dtype=float)
+        sim.record_controller_debug(debug.current_target, debug.mode)
+
+        # 7. Advance robot (true state)
         state = sim.step(action, command_mode=command_mode)
+
         if stop_at_goal and float(np.linalg.norm(state[:2] - goal_xy)) <= goal_tolerance:
             break
 
+    if cannon is not None:
+        print(
+            f"[Cannon] Total shots fired: {cannon.shot_count} | "
+            f"Projectiles still alive at end: {len(active_projectiles)}"
+        )
+
     if render:
         _ = render_every
-        Visualizer(sim=sim, goal=goal, obstacles=tuple(obstacles)).render(
-            realtime=True,
-            repeat=False,
-        )
+        Visualizer(
+            sim=sim,
+            goal=goal,
+            obstacles=tuple(obstacles),
+            cannon_pos=(cannon_config.x, cannon_config.y) if cannon_config.enabled else None,
+        ).render(realtime=True, repeat=False)
 
     return sim
 
@@ -379,6 +472,8 @@ def main() -> None:
             command_mode=args.command_mode,
             stop_at_goal=CFG.simulation.stop_at_goal,
             goal_tolerance=CFG.simulation.goal_tolerance,
+            noise_config=CFG.noise,
+            cannon_config=CFG.cannon,
             render=args.render,
             render_every=args.render_every,
         )
@@ -400,7 +495,12 @@ def main() -> None:
         )
 
         if args.animate:
-            Visualizer(sim=sim, goal=goal, obstacles=obstacles).render(
+            Visualizer(
+                sim=sim,
+                goal=goal,
+                obstacles=obstacles,
+                cannon_pos=(CFG.cannon.x, CFG.cannon.y) if CFG.cannon.enabled else None,
+            ).render(
                 realtime=True,
                 repeat=False,
                 close_on_finish=args.episodes != 1,

@@ -203,6 +203,32 @@ def compute_side_bypass_waypoints(
     return base + bypass_radius * normal, base - bypass_radius * normal
 
 
+@dataclass(frozen=True, slots=True)
+class MovingObstacle:
+    """A moving circular obstacle (e.g. a projectile).
+
+    Attributes
+    ----------
+    x, y     : current position, m
+    vx, vy   : current velocity, m/s  (assumed constant over the lookahead horizon)
+    radius   : collision radius, m
+    """
+
+    x: float
+    y: float
+    vx: float
+    vy: float
+    radius: float
+
+    @property
+    def position(self) -> np.ndarray:
+        return np.array([self.x, self.y], dtype=float)
+
+    @property
+    def velocity(self) -> np.ndarray:
+        return np.array([self.vx, self.vy], dtype=float)
+
+
 @dataclass(slots=True)
 class ControlDiagnostics:
     """Diagnostic values for the Lyapunov point-stabilizing controller."""
@@ -252,6 +278,10 @@ class LyapunovTrackedRobotController:
     visibility_samples_per_obstacle: int = 12
     planner_clearance: float = 0.35
     waypoint_reached_radius: float = 0.35
+    # Dodge parameters for moving obstacles (projectiles)
+    dodge_lookahead: float = 2.0       # seconds to look ahead for collision
+    dodge_escape_distance: float = 1.8  # metres to step sideways when dodging
+    dodge_danger_factor: float = 1.5    # multiplier on (robot_radius + safety_margin + obs.radius)
     obstacle_avoidance_active: bool = field(init=False, default=False)
     current_waypoint: np.ndarray | None = field(init=False, default=None)
     current_obstacle_index: int | None = field(init=False, default=None)
@@ -308,15 +338,22 @@ class LyapunovTrackedRobotController:
             raise ValueError("planner_clearance must be non-negative")
         if self.waypoint_reached_radius <= 0.0:
             raise ValueError("waypoint_reached_radius must be positive")
+        if self.dodge_lookahead <= 0.0:
+            raise ValueError("dodge_lookahead must be positive")
+        if self.dodge_escape_distance <= 0.0:
+            raise ValueError("dodge_escape_distance must be positive")
+        if self.dodge_danger_factor <= 0.0:
+            raise ValueError("dodge_danger_factor must be positive")
 
     def virtual_control(
         self,
         state: object,
         goal: object | None = None,
         obstacles: Iterable[object] | None = None,
+        moving_obstacles: Iterable[MovingObstacle] | None = None,
     ) -> tuple[float, float]:
         """Return the equivalent unicycle command (v, omega)."""
-        diagnostics = self.diagnostics(state, goal, obstacles)
+        diagnostics = self.diagnostics(state, goal, obstacles, moving_obstacles)
         return diagnostics.v, diagnostics.omega
 
     def track_control(
@@ -324,9 +361,10 @@ class LyapunovTrackedRobotController:
         state: object,
         goal: object | None = None,
         obstacles: Iterable[object] | None = None,
+        moving_obstacles: Iterable[MovingObstacle] | None = None,
     ) -> tuple[float, float]:
         """Return left and right track velocities (u_L, u_R)."""
-        diagnostics = self.diagnostics(state, goal, obstacles)
+        diagnostics = self.diagnostics(state, goal, obstacles, moving_obstacles)
         return diagnostics.u_l, diagnostics.u_r
 
     def get_control(
@@ -334,9 +372,10 @@ class LyapunovTrackedRobotController:
         state: object,
         goal: object | None = None,
         obstacles: Iterable[object] | None = None,
+        moving_obstacles: Iterable[MovingObstacle] | None = None,
     ) -> np.ndarray:
         """Return a command compatible with the configured output mode."""
-        diagnostics = self.diagnostics(state, goal, obstacles)
+        diagnostics = self.diagnostics(state, goal, obstacles, moving_obstacles)
         if self.output_mode == "vw":
             return np.array([diagnostics.v, diagnostics.omega], dtype=float)
         return np.array([diagnostics.u_l, diagnostics.u_r], dtype=float)
@@ -346,9 +385,10 @@ class LyapunovTrackedRobotController:
         state: object,
         goal: object | None = None,
         obstacles: Iterable[object] | None = None,
+        moving_obstacles: Iterable[MovingObstacle] | None = None,
     ) -> tuple[float, float, ControlDiagnostics]:
         """Return track commands and debug information."""
-        diagnostics = self.diagnostics(state, goal, obstacles)
+        diagnostics = self.diagnostics(state, goal, obstacles, moving_obstacles)
         return diagnostics.u_l, diagnostics.u_r, diagnostics
 
     def __call__(self, _: float, state: object) -> np.ndarray:
@@ -360,8 +400,15 @@ class LyapunovTrackedRobotController:
         state: object,
         goal: object | None = None,
         obstacles: Iterable[object] | None = None,
+        moving_obstacles: Iterable[MovingObstacle] | None = None,
     ) -> ControlDiagnostics:
-        """Compute command and Lyapunov diagnostic values."""
+        """Compute command and Lyapunov diagnostic values.
+
+        Priority order:
+          1. Unsafe recovery  (robot inside a static obstacle — numerical edge case)
+          2. Dodge manoeuvre  (incoming projectile within lookahead horizon)
+          3. Static obstacle avoidance / normal goal tracking
+        """
         x, y, theta = _as_pose(state)
         goal_xy = np.array(_as_goal_xy(self.goal if goal is None else goal), dtype=float)
         obstacle_list = self.obstacles if obstacles is None else tuple(
@@ -369,6 +416,8 @@ class LyapunovTrackedRobotController:
         )
 
         pos = np.array([x, y], dtype=float)
+
+        # Priority 1: unsafe recovery
         unsafe = self._unsafe_obstacle(pos, obstacle_list)
         if unsafe is not None:
             index, obstacle = unsafe
@@ -377,6 +426,13 @@ class LyapunovTrackedRobotController:
             self.current_obstacle_index = index
             return diagnostics
 
+        # Priority 2: dodge incoming projectile
+        if moving_obstacles is not None:
+            dodge_diag = self._dodge_check(pos, theta, tuple(moving_obstacles))
+            if dodge_diag is not None:
+                return dodge_diag
+
+        # Priority 3: normal navigation (static obstacle avoidance or goal tracking)
         stalled = self._update_stall_state(pos, goal_xy)
         target, mode, blocking_index = self._select_current_target(pos, theta, goal_xy, obstacle_list)
         return self._lyapunov_diagnostics(
@@ -409,6 +465,12 @@ class LyapunovTrackedRobotController:
         else:
             v = float(self.k_rho * rho * np.cos(alpha))
             omega = float(self.k_alpha * np.sin(alpha))
+            # Near-goal damping: scale ω by ρ/(ρ+ε) so that as ρ→0, ω→0.
+            # This prevents noise-induced spinning when the robot is close to
+            # the target.  The standard Lyapunov analysis holds for ρ > eps_goal;
+            # inside eps_goal the robot stops anyway.
+            omega_scale = rho / (rho + 3.0 * self.eps_goal)
+            omega *= omega_scale
             if mode == "obstacle_avoidance":
                 v, omega = self._avoidance_motion_guard(v, omega, alpha, stalled)
 
@@ -731,6 +793,69 @@ class LyapunovTrackedRobotController:
             V=self.lyapunov_c * (1.0 - float(np.cos(alpha))),
             avoidance_active=True,
         )
+
+    def _dodge_check(
+        self,
+        pos: np.ndarray,
+        theta: float,
+        moving_obstacles: tuple[MovingObstacle, ...],
+    ) -> ControlDiagnostics | None:
+        """Return a dodge command if any projectile will hit within the lookahead.
+
+        Algorithm (per projectile):
+          1. Compute time of closest approach (CPA) assuming the robot is
+             quasi-stationary (conservative: over-reacts slightly, but safe).
+          2. If t_cpa ≤ dodge_lookahead AND miss_distance ≤ danger_radius → dodge.
+          3. Escape perpendicular to the projectile's velocity vector, choosing
+             the side that puts the robot farther from the CPA point.
+
+        The resulting escape_target is fed into the standard Lyapunov law,
+        so stability proofs still apply for the point-stabilisation phase.
+        """
+        for obs in moving_obstacles:
+            v = obs.velocity
+            speed = float(np.linalg.norm(v))
+            if speed < 1e-9:
+                continue  # stationary — handled by static obstacle avoidance
+
+            p = obs.position
+            rel = p - pos  # vector from robot to projectile
+
+            # t_cpa: time at which projectile is closest to robot
+            # d/dt |p + v·t - pos|² = 0  →  t_cpa = dot(pos - p, v) / |v|²
+            t_cpa = float(np.dot(pos - p, v)) / float(np.dot(v, v))
+            t_cpa = max(0.0, t_cpa)
+
+            if t_cpa > self.dodge_lookahead:
+                continue
+
+            cpa = p + t_cpa * v
+            miss_distance = float(np.linalg.norm(cpa - pos))
+            danger_radius = (
+                obs.radius + self.robot_radius + self.safety_margin
+            ) * self.dodge_danger_factor
+
+            if miss_distance > danger_radius:
+                continue
+
+            # Dodge: move perpendicular to projectile velocity
+            perp = np.array([-v[1], v[0]], dtype=float) / speed
+            escape_a = pos + self.dodge_escape_distance * perp
+            escape_b = pos - self.dodge_escape_distance * perp
+
+            # Choose the side farther from the projectile's CPA
+            dist_a = float(np.linalg.norm(escape_a - cpa))
+            dist_b = float(np.linalg.norm(escape_b - cpa))
+            escape_target = escape_a if dist_a >= dist_b else escape_b
+
+            return self._lyapunov_diagnostics(
+                state=(float(pos[0]), float(pos[1]), theta),
+                target=escape_target,
+                mode="dodge",
+                blocking_obstacle_index=None,
+            )
+
+        return None
 
     def _clear_avoidance(self) -> None:
         """Reset obstacle-avoidance supervisor state."""

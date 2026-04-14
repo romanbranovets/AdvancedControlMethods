@@ -16,11 +16,49 @@ class SimulationConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class NoiseConfig:
+    """Additive Gaussian measurement noise on the robot state.
+
+    Models sensor imperfections (GPS jitter, IMU drift).
+    Noise is applied to the observed state before passing it to the controller;
+    the simulator always integrates the true (noiseless) state.
+    """
+
+    enabled: bool = True
+    position_std: float = 0.03   # σ_pos — std of x and y noise, m
+    heading_std: float = 0.015   # σ_hdg — std of θ noise, rad
+    seed: int | None = None      # None → different sequence each run
+
+
+@dataclass(frozen=True, slots=True)
+class CannonConfig:
+    """Stationary cannon that fires projectiles as a Poisson process.
+
+    Inter-arrival times are i.i.d. Exp(1/mean_fire_interval).
+    Each shot is aimed at the robot with Gaussian angular noise.
+    """
+
+    enabled: bool = True
+    x: float = 9.0                    # cannon x position, m
+    y: float = -6.0                   # cannon y position, m
+    mean_fire_interval: float = 1.2   # mean seconds between shots (Poisson rate λ = 1/1.2)
+    projectile_speed: float = 7.5     # muzzle speed, m/s
+    projectile_radius: float = 0.18   # collision radius of each shell, m
+    angular_spread_std: float = 0.07  # Gaussian aim noise std, rad (~4°) — very accurate
+    max_projectile_age: float = 10.0  # seconds until a shell is removed
+    seed: int | None = None           # None → different sequence each run
+    # Dodge parameters (controller reacts to incoming projectiles)
+    dodge_lookahead: float = 2.5        # seconds to look ahead — more for faster shells
+    dodge_escape_distance: float = 2.2  # metres to step sideways when dodging
+    dodge_danger_factor: float = 1.5    # multiplier on danger radius
+
+
+@dataclass(frozen=True, slots=True)
 class ControllerConfig:
     """Default Lyapunov tracked-robot controller settings."""
 
     k_rho: float = 0.8
-    k_alpha: float = 4.0
+    k_alpha: float = 3.0
     b: float = 0.52
     u_max: float | None = 2.0
     eps_goal: float = 0.05
@@ -48,19 +86,19 @@ class RandomScenarioConfig:
 
     enabled: bool = True
     seed: int | None = None
-    obstacle_count_range: tuple[int, int] = (2, 5)
-    obstacle_radius_range: tuple[float, float] = (0.35, 0.9)
-    x_range: tuple[float, float] = (-4.0, 4.0)
-    y_range: tuple[float, float] = (-3.0, 4.0)
-    start_x_range: tuple[float, float] = (-4.0, 0.5)
-    start_y_range: tuple[float, float] = (-3.0, 3.0)
+    obstacle_count_range: tuple[int, int] = (4, 7)
+    obstacle_radius_range: tuple[float, float] = (0.45, 1.1)
+    x_range: tuple[float, float] = (-6.0, 5.0)
+    y_range: tuple[float, float] = (-4.0, 6.0)
+    start_x_range: tuple[float, float] = (-8.0, -3.0)
+    start_y_range: tuple[float, float] = (-5.0, 5.0)
     start_theta_range: tuple[float, float] = (-3.141592653589793, 3.141592653589793)
-    min_start_goal_distance: float = 2.0
-    min_clearance: float = 1.0
+    min_start_goal_distance: float = 7.0
+    min_clearance: float = 0.8
     max_attempts: int = 500
     validate_scenario: bool = True
     validation_attempts: int = 30
-    validation_steps: int = 1000
+    validation_steps: int = 2000
     validation_goal_tolerance: float = 0.1
 
 
@@ -71,7 +109,9 @@ class AppConfig:
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     controller: ControllerConfig = field(default_factory=ControllerConfig)
     random: RandomScenarioConfig = field(default_factory=RandomScenarioConfig)
-    goal: tuple[float, float] = (5.0, 3.0)
+    noise: NoiseConfig = field(default_factory=NoiseConfig)
+    cannon: CannonConfig = field(default_factory=CannonConfig)
+    goal: tuple[float, float] = (6.0, 4.0)
     obstacles: tuple[tuple[float, float, float], ...] = ()
     render_every: int = 10
 

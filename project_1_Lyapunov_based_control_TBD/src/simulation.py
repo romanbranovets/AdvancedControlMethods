@@ -88,6 +88,8 @@ class TrackedRobotSim:
     _times: list[float] = field(default_factory=list)
     _targets: list[np.ndarray] = field(default_factory=list)
     _modes: list[str] = field(default_factory=list)
+    # Each entry: list of (x, y, radius) tuples for alive projectiles at that step
+    _projectile_snapshots: list[list[tuple[float, float, float]]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.state = np.asarray(self.state, dtype=float).reshape(-1)
@@ -133,6 +135,17 @@ class TrackedRobotSim:
         self._targets.append(target_xy.copy())
         self._modes.append(str(mode))
 
+    def record_projectile_snapshot(
+        self, projectiles: list[tuple[float, float, float]]
+    ) -> None:
+        """Record (x, y, radius) of all alive projectiles at the current step."""
+        self._projectile_snapshots.append(list(projectiles))
+
+    @property
+    def projectile_snapshots(self) -> list[list[tuple[float, float, float]]]:
+        """Per-step list of alive projectile positions: [(x, y, r), …]."""
+        return list(self._projectile_snapshots)
+
     def _body_polygons(self, state: np.ndarray | Iterable[float]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return body, left-track, and right-track polygons for visualization."""
         x, y, th = np.asarray(state, dtype=float).reshape(3)
@@ -170,6 +183,7 @@ class TrackedRobotSim:
         self._times = [0.0]
         self._targets = []
         self._modes = []
+        self._projectile_snapshots = []
         return self.state.copy()
 
     def step_tracks(self, v_l: float, v_r: float) -> np.ndarray:

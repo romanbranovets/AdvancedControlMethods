@@ -2,6 +2,7 @@
 visualization.py
 Класс-обёртка для красивой визуализации гусеничного робота.
 Использует готовые данные из TrackedRobotSim (история позиций + скорости гусениц).
+Поддерживает анимацию пушки и снарядов.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.patches import Circle, Polygon
+from matplotlib.patches import Circle, Polygon, FancyArrow
 
 # Импортируем симулятор и контроллеры
 try:
@@ -26,6 +27,7 @@ class Visualizer:
         sim: TrackedRobotSim,
         goal: np.ndarray | list[float] | None = None,
         obstacles: list[tuple[float, float, float]] | tuple[tuple[float, float, float], ...] | None = None,
+        cannon_pos: tuple[float, float] | None = None,
         title: str = "Движение гусеничного робота к цели (две гусеницы)",
         figsize: tuple[float, float] = (12, 8),
         show_controls: bool = True,
@@ -36,6 +38,8 @@ class Visualizer:
         Параметры:
             sim            — экземпляр TrackedRobotSim после sim.run(...)
             goal           — координаты цели [x, y]
+            obstacles      — статические препятствия [(x, y, r), ...]
+            cannon_pos     — позиция пушки (x, y), или None если пушки нет
             title          — заголовок анимации
             figsize        — размер окна
             show_controls  — показывать скорости левой/правой гусеницы в заголовке
@@ -51,6 +55,7 @@ class Visualizer:
         self.times = sim.times
         self.targets = sim.targets
         self.modes = sim.modes
+        self.projectile_snapshots = sim.projectile_snapshots  # per-step list of (x,y,r)
 
         self.goal = (
             np.asarray(goal, dtype=float).reshape(2)
@@ -58,6 +63,7 @@ class Visualizer:
             else np.array([10.0, 5.0])
         )
         self.obstacles = tuple(obstacles or ())
+        self.cannon_pos = cannon_pos
         self.title = title
         self.figsize = figsize
         self.show_controls = show_controls
@@ -115,6 +121,23 @@ class Visualizer:
             )
             self.ax.add_patch(obstacle_patch)
 
+        # Draw cannon as a static dark rectangle
+        if self.cannon_pos is not None:
+            cx, cy = self.cannon_pos
+            cannon_body = Circle(
+                (cx, cy), 0.45,
+                facecolor="#1a1a2e",
+                edgecolor="#e94560",
+                linewidth=2.5,
+                zorder=8,
+                label="Пушка",
+            )
+            self.ax.add_patch(cannon_body)
+            self.ax.plot(cx, cy, "r^", markersize=14, zorder=9)
+
+        # Projectile patches — created/destroyed each frame
+        self._projectile_patches: list[Circle] = []
+
         # Начальная позиция
         self.ax.plot(
             self.hist[0, 0],
@@ -129,25 +152,6 @@ class Visualizer:
         (self.path_line,) = self.ax.plot(
             [], [], "b-", linewidth=3, label="Пройденный путь", alpha=0.85, zorder=4
         )
-
-        if len(self.targets) > 0:
-            avoidance_targets = [
-                target
-                for target, mode in zip(self.targets, self.modes)
-                if mode == "obstacle_avoidance"
-            ]
-            if avoidance_targets:
-                unique_targets = np.unique(np.round(np.vstack(avoidance_targets), 3), axis=0)
-                self.ax.scatter(
-                    unique_targets[:, 0],
-                    unique_targets[:, 1],
-                    marker="x",
-                    s=90,
-                    c="orange",
-                    linewidths=2.0,
-                    label="Промежуточные точки",
-                    zorder=6,
-                )
 
         (self.current_target_marker,) = self.ax.plot(
             [],
@@ -227,12 +231,39 @@ class Visualizer:
             if (
                 len(self.targets) > 0
                 and target_index >= 0
-                and self.modes[target_index] == "obstacle_avoidance"
+                and self.modes[target_index] in ("obstacle_avoidance", "dodge")
             ):
                 target = self.targets[target_index]
                 self.current_target_marker.set_data([target[0]], [target[1]])
             else:
                 self.current_target_marker.set_data([], [])
+
+            # Снаряды: убираем старые, рисуем текущие
+            for patch in self._projectile_patches:
+                patch.remove()
+            self._projectile_patches.clear()
+
+            if frame < len(self.projectile_snapshots):
+                for (px, py, pr) in self.projectile_snapshots[frame]:
+                    patch = Circle(
+                        (px, py), pr,
+                        facecolor="#e94560",
+                        edgecolor="#ff0000",
+                        alpha=0.9,
+                        linewidth=1.5,
+                        zorder=12,
+                    )
+                    self.ax.add_patch(patch)
+                    self._projectile_patches.append(patch)
+
+            # Определяем режим контроллера для заголовка
+            mode_str = ""
+            if len(self.modes) > 0:
+                cur_mode = self.modes[min(frame, len(self.modes) - 1)]
+                if cur_mode == "dodge":
+                    mode_str = " | ⚡ УКЛОНЕНИЕ"
+                elif cur_mode == "obstacle_avoidance":
+                    mode_str = " | ↩ обход препятствия"
 
             # Заголовок
             if self.show_controls and frame < len(self.controls):
@@ -241,11 +272,12 @@ class Visualizer:
                     f"{self.title}\n"
                     f"t = {self.times[frame]:.2f} с | "
                     f"vₗ = {vl:+.2f} м/с | vᵣ = {vr:+.2f} м/с"
+                    f"{mode_str}"
                 )
             else:
-                title_str = f"{self.title}\n t = {self.times[frame]:.2f} с"
+                title_str = f"{self.title}\nt = {self.times[frame]:.2f} с{mode_str}"
 
-            self.ax.set_title(title_str, fontsize=14)
+            self.ax.set_title(title_str, fontsize=13)
             if close_on_finish and not repeat and frame == len(self.hist) - 1:
                 self.fig.canvas.new_timer(
                     interval=max(100, interval),
@@ -259,6 +291,7 @@ class Visualizer:
                 self.right_track_patch,
                 self.heading_line,
                 self.current_target_marker,
+                *self._projectile_patches,
             )
 
         # Создаём анимацию
