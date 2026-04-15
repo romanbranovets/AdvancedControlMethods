@@ -4,6 +4,17 @@
 > **Topic:** Lyapunov stabilization for a nonlinear unicycle-like system  
 > **Task:** Drive a differential-drive tracked robot from an arbitrary initial pose to a goal position in a cluttered environment under sensor noise and projectile disturbances
 
+<table>
+<tr>
+<td><b>Robot animation</b></td>
+<td><b>Lyapunov V(t) animation</b></td>
+</tr>
+<tr>
+<td><img src="animations/robot.gif" alt="Robot animation" width="480"/></td>
+<td><img src="animations/lyapunov.gif" alt="Lyapunov animation" width="480"/></td>
+</tr>
+</table>
+
 ---
 
 ## Table of Contents
@@ -203,13 +214,13 @@ where $\tilde{\mathbf{s}}_k$ is the noisy measurement.  The simulator integrates
 
 ### Cannon (Poisson firing process)
 
-The cannon fires projectiles as a Poisson process with mean inter-arrival time $\bar{T} = 1.2$ s.  Each inter-arrival interval is sampled as:
+The cannon fires projectiles as a Poisson process with mean inter-arrival time $\bar{T} = 1.5$ s.  Each inter-arrival interval is sampled as:
 
 $$
-T \sim \operatorname{Exp}(1/\bar{T}), \qquad T = -\bar{T}\ln U, \quad U \sim \mathcal{U}(0,1)
+T \sim \text{Exp}(1/\bar{T}), \qquad T = -\bar{T}\ln U, \quad U \sim \mathcal{U}(0,1)
 $$
 
-The raw uniform variate $U$ is stored in `cannon.fire_log` for independent statistical verification.  Each shot is aimed at the robot's current position with Gaussian angular noise $\sigma_\phi = 0.07$ rad.
+The raw uniform variate $U$ is stored in `cannon.fire_log` for independent statistical verification.  Each shot is aimed at the robot's current position with Gaussian angular noise $\sigma_\phi = 0.10$ rad.
 
 ---
 
@@ -294,12 +305,12 @@ RETURN sim (contains full history, controls, modes, Lyapunov values)
 | Parameter | Value |
 |-----------|-------|
 | Position | $(9.0,\; -6.0)$ m |
-| Mean fire interval $\bar{T}$ | 1.2 s |
+| Mean fire interval $\bar{T}$ | 1.5 s |
 | Projectile speed | 7.5 m/s |
 | Projectile radius $r_{\text{proj}}$ | 0.18 m |
-| Aim noise std | 0.07 rad |
-| Dodge lookahead $T_{\text{lookahead}}$ | 1.0 s |
-| Danger factor $f_{\text{danger}}$ | 1.02 |
+| Aim noise std | 0.10 rad |
+| Dodge lookahead $T_{\text{lookahead}}$ | 1.2 s |
+| Danger factor $f_{\text{danger}}$ | 1.4 |
 
 ---
 
