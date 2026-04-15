@@ -49,7 +49,7 @@ class CannonConfig:
     seed: int | None = None           # None → different sequence each run
     # Dodge parameters (controller reacts to incoming projectiles)
     dodge_lookahead: float = 1.2        # seconds — react early enough to steer clear
-    dodge_danger_factor: float = 1.4   # react to near-misses within 40% buffer
+    dodge_danger_factor: float = 1.2   # react to near-misses within 20% buffer
 
 
 @dataclass(frozen=True, slots=True)

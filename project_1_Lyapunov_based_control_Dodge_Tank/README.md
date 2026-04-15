@@ -34,7 +34,7 @@
 
 ### Control objective
 
-Steer the robot from an arbitrary initial pose $(x_0,\, y_0,\, \theta_0)$ to a desired goal position $\mathbf{g} = (g_x,\, g_y)$ while:
+Steer the robot from an arbitrary initial pose $(x_0, y_0, \theta_0)$ to a desired goal position $\mathbf{g} = (g_x, g_y)$ while:
 
 - avoiding known static circular obstacles,
 - reacting to incoming projectiles fired by a stationary cannon,
@@ -58,9 +58,9 @@ Lyapunov-based point stabilization.  A scalar Lyapunov function $V(\rho, \alpha)
 |--------|---------|------|
 | $x, y$ | Robot centre position | m |
 | $\theta$ | Robot heading (yaw) | rad |
-| $v_L,\, v_R$ | Left and right track speeds (control inputs) | m/s |
+| $v_L, v_R$ | Left and right track speeds (control inputs) | m/s |
 
-The full state vector is $\mathbf{s} = (x,\, y,\, \theta)^\top \in \mathbb{R}^2 \times \mathbb{S}^1$.
+The full state vector is $\mathbf{s} = (x, y, \theta)^\top \in \mathbb{R}^2 \times \mathbb{S}^1$.
 
 ### Equations of motion (discrete Euler integration, step $\Delta t$)
 
@@ -83,7 +83,7 @@ where $L$ is the distance between track centres, $v$ is the linear (forward) spe
 
 ### Constraints
 
-$$|v_L|,\, |v_R| \;\le\; u_{\max} = 2.0\;\text{m/s}$$
+$$|v_L|, |v_R| \le u_{\max} = 2.0 \text{ m/s}$$
 
 ### Geometry
 
@@ -98,24 +98,24 @@ The robot body is a rectangle of length $1.0$ m and width $0.7$ m, flanked by tw
 Let $\mathbf{g} = (g_x, g_y)$ be the goal.  Define:
 
 $$
-\rho \;=\; \bigl\|\mathbf{g} - (x,y)\bigr\|_2 \;\ge\; 0
+\rho = \|\mathbf{g} - (x,y)\|_2 \ge 0
 \qquad\text{(distance to goal)}
 $$
 
 $$
-\phi \;=\; \text{atan2}(g_y - y,\; g_x - x)
+\phi = \text{atan2}(g_y - y,\ g_x - x)
 \qquad\text{(direction from robot to goal)}
 $$
 
 $$
-\alpha \;=\; \phi - \theta \;\in\; (-\pi, \pi]
+\alpha = \phi - \theta \in (-\pi, \pi]
 \qquad\text{(heading error; wrapped to } (-\pi,\pi])
 $$
 
 ### Lyapunov function
 
 $$
-\boxed{V(\rho, \alpha) \;=\; \tfrac{1}{2}\rho^2 \;+\; c\,(1 - \cos\alpha)}
+\boxed{V(\rho, \alpha) = \tfrac{1}{2}\rho^2 + c(1 - \cos\alpha)}
 $$
 
 where $c > 0$ is a tuning parameter (default $c = 1.0$).
@@ -136,20 +136,20 @@ $$
 
 $$
 \dot{V} = \rho\dot{\rho} + c\sin\alpha\cdot\dot{\alpha}
-       = -\rho v\cos\alpha + c\sin\alpha\!\left(-\omega + \frac{v\sin\alpha}{\rho}\right)
+       = -\rho v\cos\alpha + c\sin\alpha \left(-\omega + \frac{v\sin\alpha}{\rho}\right)
 $$
 
 Choosing
 
 $$
-v = k_\rho\,\rho\cos\alpha, \qquad
-\omega = k_\alpha\sin\alpha
+v = k_\rho \rho \cos\alpha, \qquad
+\omega = k_\alpha \sin\alpha
 $$
 
 yields:
 
 $$
-\dot{V} = -k_\rho\,\rho^2\cos^2\!\alpha \;-\; k_\alpha\,c\,\sin^2\!\alpha \;\le\; 0
+\dot{V} = -k_\rho \rho^2 \cos^2\alpha - k_\alpha c \sin^2\alpha \le 0
 $$
 
 provided $k_\rho > 0$ and $k_\alpha > 0$, which guarantees **asymptotic stability** of $\rho = 0$.
@@ -163,8 +163,8 @@ provided $k_\rho > 0$ and $k_\alpha > 0$, which guarantees **asymptotic stabilit
 The nominal control law (in unicycle $(v, \omega)$ coordinates) is:
 
 $$
-v^* = k_\rho\,\rho\cos\alpha, \qquad
-\omega^* = k_\alpha\sin\alpha
+v^* = k_\rho \rho \cos\alpha, \qquad
+\omega^* = k_\alpha \sin\alpha
 $$
 
 These are then converted to track speeds via:
@@ -173,7 +173,7 @@ $$
 v_L = v - \tfrac{L}{2}\omega, \qquad v_R = v + \tfrac{L}{2}\omega
 $$
 
-and clipped to $[-u_{\max},\, u_{\max}]$.
+and clipped to $[-u_{\max}, u_{\max}]$.
 
 **Near-goal damping.**  To suppress noise-driven spinning as $\rho \to 0$, angular velocity is scaled by $\omega \leftarrow \omega \cdot \dfrac{\rho}{\rho + 3\varepsilon}$, where $\varepsilon$ is the goal-acceptance radius.  This does not affect the Lyapunov analysis for $\rho > \varepsilon$.
 

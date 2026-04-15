@@ -892,30 +892,12 @@ class LyapunovTrackedRobotController:
             else:
                 lateral_dir = -perp_pos
 
-        # ── Step 3: compute Δω to steer in lateral_dir ──────────────────────
+        # ── Step 3: determine dodge side ─────────────────────────────────────
         # Positive ω = CCW = robot turns left.  "Left" in robot frame:
         left_dir = np.array([-np.sin(theta), np.cos(theta)])
         omega_sign = 1.0 if float(np.dot(lateral_dir, left_dir)) >= 0.0 else -1.0
 
-        # Magnitude: proportional to threat severity, but intentionally mild.
-        # At lookahead 1.0s and v≥0.7 m/s, Δω=1.5 rad/s gives lateral arc
-        # ≈ 0.5·v·Δω·t² ≈ 0.5·0.7·1.5·1² ≈ 0.5 m — just enough to clear the
-        # hitbox sum (~0.53 m).  Using self.k_alpha (=3.0) here would create
-        # R=v/ω≈0.12 m circles and make the robot spin instead of arc.
-        threat_fraction = max(0.0, (coll_r - miss_dist) / coll_r)
-        _DODGE_W_GAIN = 2.0   # rad/s at max threat — gentle, predictable arc
-        omega_correction = omega_sign * _DODGE_W_GAIN * (0.5 + threat_fraction)
-        # Hard cap: never exceed half the actuator limit (leaves room for v)
-        if self.u_max is not None:
-            max_w = self.u_max / self.b   # half of actuator-max angular rate
-            omega_correction = float(np.clip(omega_correction, -max_w, max_w))
-
         # ── Step 4: compute normal Lyapunov output toward the nav target ────
-        # If obstacle avoidance is active, keep targeting the current waypoint
-        # so the robot does not steer into obstacles.  Otherwise target goal.
-        # Either way we enforce a minimum forward speed below so the robot never
-        # stalls during a dodge (waypoints behind the robot produce v<0 which
-        # would make us a stationary target — the min-v clamp handles this).
         if self.obstacle_avoidance_active and self.current_waypoint is not None:
             nav_target = np.asarray(self.current_waypoint, dtype=float)
         else:
@@ -928,13 +910,30 @@ class LyapunovTrackedRobotController:
             blocking_obstacle_index=None,
         )
 
-        # ── Step 5: inject Δω, enforce minimum forward speed, re-clip ────────
-        new_omega = normal_diag.omega + omega_correction
-        # Clamp v ≥ _MIN_DODGE_V: a moving robot is far harder to hit than a
-        # stationary one.  This is the key fix — previously the avoidance-motion
-        # guard or a large heading error could drive v to zero during dodge.
-        _MIN_DODGE_V = 1.0   # m/s — R = v/ω = 1.0/2.0 = 0.5 m arc, clears 0.53 m hitbox
+        # ── Step 5: additive correction with cancellation guard ──────────────
+        # Compute the correction magnitude from the quarter-turn rule:
+        #   ω_opt = π / (2·t_cpa) gives maximum lateral displacement v·t·2/π.
+        # Cap at a comfortable value so fast detections don't over-steer.
+        omega_cap = (self.u_max / self.b) if self.u_max is not None else 4.0
+        if t_cpa > 0.05:
+            omega_correction_mag = min(np.pi / (2.0 * t_cpa), 2.0)
+        else:
+            omega_correction_mag = 2.0
+        omega_correction = omega_sign * omega_correction_mag
+
+        # Cancellation guard: the Lyapunov term can oppose the correction
+        # (e.g., robot needs to turn right for a waypoint while dodge says left).
+        # We keep the additive sum UNLESS it falls below the bare correction,
+        # in which case we fall back to the correction alone.
+        omega_candidate = normal_diag.omega + omega_correction
+        if omega_sign * omega_candidate < omega_correction_mag:
+            new_omega = omega_correction          # Lyapunov cancelled too much
+        else:
+            new_omega = omega_candidate           # combined turn OK
+
+        _MIN_DODGE_V = 1.5   # m/s — ensures the arc actually covers the hitbox
         base_v = max(normal_diag.v, _MIN_DODGE_V)
+
         u_l, u_r = unicycle_to_tracks(base_v, new_omega, self.b)
         if self.u_max is not None:
             u_l = float(np.clip(u_l, -self.u_max, self.u_max))
