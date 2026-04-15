@@ -264,7 +264,6 @@ def run(
         planner_clearance=planner_clearance,
         waypoint_reached_radius=waypoint_reached_radius,
         dodge_lookahead=cannon_config.dodge_lookahead,
-        dodge_escape_distance=cannon_config.dodge_escape_distance,
         dodge_danger_factor=cannon_config.dodge_danger_factor,
         output_mode=command_mode,
     )
@@ -320,9 +319,10 @@ def run(
             proj.step(dt, sim.xlim, sim.ylim, cannon_config.max_projectile_age)
         active_projectiles = [p for p in active_projectiles if p.alive]
 
-        # 3. Record projectile snapshot for this step
+        # 3. Record projectile snapshot + hitbox collision detection
         sim.record_projectile_snapshot(
-            [(p.x, p.y, p.radius) for p in active_projectiles]
+            [(p.x, p.y, p.radius) for p in active_projectiles],
+            robot_radius=robot_radius,
         )
 
         # 4. Apply measurement noise then EMA low-pass filter.
@@ -376,6 +376,9 @@ def run(
             goal=goal,
             obstacles=tuple(obstacles),
             cannon_pos=(cannon_config.x, cannon_config.y) if cannon_config.enabled else None,
+            robot_radius=robot_radius,
+            goal_radius=goal_tolerance,
+            lyapunov_c=lyapunov_c,
         ).render(realtime=True, repeat=False)
 
     return sim
@@ -500,6 +503,8 @@ def main() -> None:
                 goal=goal,
                 obstacles=obstacles,
                 cannon_pos=(CFG.cannon.x, CFG.cannon.y) if CFG.cannon.enabled else None,
+                robot_radius=CFG.controller.robot_radius,
+                lyapunov_c=CFG.controller.lyapunov_c,
             ).render(
                 realtime=True,
                 repeat=False,

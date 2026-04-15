@@ -90,6 +90,8 @@ class TrackedRobotSim:
     _modes: list[str] = field(default_factory=list)
     # Each entry: list of (x, y, radius) tuples for alive projectiles at that step
     _projectile_snapshots: list[list[tuple[float, float, float]]] = field(default_factory=list)
+    # True at steps where a projectile actually hit the robot
+    _collision_steps: list[bool] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.state = np.asarray(self.state, dtype=float).reshape(-1)
@@ -136,15 +138,38 @@ class TrackedRobotSim:
         self._modes.append(str(mode))
 
     def record_projectile_snapshot(
-        self, projectiles: list[tuple[float, float, float]]
+        self,
+        projectiles: list[tuple[float, float, float]],
+        robot_radius: float = 0.35,
     ) -> None:
-        """Record (x, y, radius) of all alive projectiles at the current step."""
+        """Record alive projectiles and detect real hitbox collisions.
+
+        A collision occurs when the distance between the robot centre and a
+        projectile centre is less than the sum of their radii:
+            |robot_pos - proj_pos| < robot_radius + proj_radius
+        """
         self._projectile_snapshots.append(list(projectiles))
+        robot_xy = self.state[:2]
+        hit = any(
+            float(np.linalg.norm(robot_xy - np.array([px, py]))) < robot_radius + pr
+            for (px, py, pr) in projectiles
+        )
+        self._collision_steps.append(hit)
 
     @property
     def projectile_snapshots(self) -> list[list[tuple[float, float, float]]]:
         """Per-step list of alive projectile positions: [(x, y, r), …]."""
         return list(self._projectile_snapshots)
+
+    @property
+    def collision_steps(self) -> list[bool]:
+        """Per-step flags: True when a projectile hitbox overlaps the robot."""
+        return list(self._collision_steps)
+
+    @property
+    def hit_count(self) -> int:
+        """Total number of simulation steps with an active collision."""
+        return sum(self._collision_steps)
 
     def _body_polygons(self, state: np.ndarray | Iterable[float]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return body, left-track, and right-track polygons for visualization."""
@@ -184,6 +209,7 @@ class TrackedRobotSim:
         self._targets = []
         self._modes = []
         self._projectile_snapshots = []
+        self._collision_steps = []
         return self.state.copy()
 
     def step_tracks(self, v_l: float, v_r: float) -> np.ndarray:

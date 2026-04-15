@@ -279,9 +279,8 @@ class LyapunovTrackedRobotController:
     planner_clearance: float = 0.35
     waypoint_reached_radius: float = 0.35
     # Dodge parameters for moving obstacles (projectiles)
-    dodge_lookahead: float = 2.0       # seconds to look ahead for collision
-    dodge_escape_distance: float = 1.8  # metres to step sideways when dodging
-    dodge_danger_factor: float = 1.5    # multiplier on (robot_radius + safety_margin + obs.radius)
+    dodge_lookahead: float = 1.2        # seconds to look ahead for collision
+    dodge_danger_factor: float = 1.4   # react to near-misses within 40% buffer
     obstacle_avoidance_active: bool = field(init=False, default=False)
     current_waypoint: np.ndarray | None = field(init=False, default=None)
     current_obstacle_index: int | None = field(init=False, default=None)
@@ -340,8 +339,6 @@ class LyapunovTrackedRobotController:
             raise ValueError("waypoint_reached_radius must be positive")
         if self.dodge_lookahead <= 0.0:
             raise ValueError("dodge_lookahead must be positive")
-        if self.dodge_escape_distance <= 0.0:
-            raise ValueError("dodge_escape_distance must be positive")
         if self.dodge_danger_factor <= 0.0:
             raise ValueError("dodge_danger_factor must be positive")
 
@@ -417,7 +414,14 @@ class LyapunovTrackedRobotController:
 
         pos = np.array([x, y], dtype=float)
 
-        # Priority 1: unsafe recovery
+        # Priority 1: dodge incoming projectile — checked first so a bullet threat
+        # is never ignored even when the robot is inside a static obstacle.
+        if moving_obstacles is not None:
+            dodge_diag = self._dodge_check(pos, theta, tuple(moving_obstacles))
+            if dodge_diag is not None:
+                return dodge_diag
+
+        # Priority 2: unsafe recovery (robot clipped inside a static obstacle)
         unsafe = self._unsafe_obstacle(pos, obstacle_list)
         if unsafe is not None:
             index, obstacle = unsafe
@@ -425,12 +429,6 @@ class LyapunovTrackedRobotController:
             self.obstacle_avoidance_active = True
             self.current_obstacle_index = index
             return diagnostics
-
-        # Priority 2: dodge incoming projectile
-        if moving_obstacles is not None:
-            dodge_diag = self._dodge_check(pos, theta, tuple(moving_obstacles))
-            if dodge_diag is not None:
-                return dodge_diag
 
         # Priority 3: normal navigation (static obstacle avoidance or goal tracking)
         stalled = self._update_stall_state(pos, goal_xy)
@@ -800,62 +798,165 @@ class LyapunovTrackedRobotController:
         theta: float,
         moving_obstacles: tuple[MovingObstacle, ...],
     ) -> ControlDiagnostics | None:
-        """Return a dodge command if any projectile will hit within the lookahead.
+        """Return a dodge command when a projectile will hit the robot.
 
-        Algorithm (per projectile):
-          1. Compute time of closest approach (CPA) assuming the robot is
-             quasi-stationary (conservative: over-reacts slightly, but safe).
-          2. If t_cpa ≤ dodge_lookahead AND miss_distance ≤ danger_radius → dodge.
-          3. Escape perpendicular to the projectile's velocity vector, choosing
-             the side that puts the robot farther from the CPA point.
+        Strategy: ANGULAR BIAS INJECTION
+          The robot does NOT stop to aim at an escape point.  Instead:
+          1. The most imminent threat is identified (smallest t_cpa among bullets
+             that will actually hit).
+          2. A steering correction Δω is added on top of the normal Lyapunov output
+             toward the robot's current navigation target (goal or active waypoint).
+          3. v is preserved — the robot keeps moving forward at its natural speed.
 
-        The resulting escape_target is fed into the standard Lyapunov law,
-        so stability proofs still apply for the point-stabilisation phase.
+          This prevents the "stop and spin" failure mode where high heading error
+          to a lateral escape point drives v ≈ 0 and ω ≫ 0.
+
+        Δω magnitude is proportional to threat severity (how deep inside the
+        collision radius the CPA point falls) and scales with k_alpha.
+        Direction is chosen so the robot steers toward the side that moves it
+        away from the bullet's line of travel, preferring the side closer to goal.
         """
+        goal_xy = np.asarray(self.goal, dtype=float)
+
+        # ── Step 1: find the single most imminent real threat ───────────────
+        best: tuple | None = None
+        best_t_cpa = float("inf")
+
         for obs in moving_obstacles:
-            v = obs.velocity
-            speed = float(np.linalg.norm(v))
+            v_b = obs.velocity
+            speed = float(np.linalg.norm(v_b))
             if speed < 1e-9:
-                continue  # stationary — handled by static obstacle avoidance
+                continue
 
-            p = obs.position
-            rel = p - pos  # vector from robot to projectile
+            p_b = obs.position
+            coll_r = (obs.radius + self.robot_radius) * self.dodge_danger_factor
 
-            # t_cpa: time at which projectile is closest to robot
-            # d/dt |p + v·t - pos|² = 0  →  t_cpa = dot(pos - p, v) / |v|²
-            t_cpa = float(np.dot(pos - p, v)) / float(np.dot(v, v))
+            # Immediate proximity gate: bullet already inside danger radius.
+            # This catches bullets that slipped past the lookahead window (e.g.
+            # because they were just outside range one step ago and then closed
+            # faster than 1 timestep).  Skip the dot-product / CPA checks — the
+            # bullet is already on top of us, treat t_cpa = 0.
+            current_dist = float(np.linalg.norm(pos - p_b))
+            if current_dist < coll_r:
+                if 0.0 < best_t_cpa:   # always beats any CPA-based candidate
+                    best_t_cpa = 0.0
+                    best = (v_b, speed, p_b, 0.0, p_b.copy(), current_dist, coll_r)
+                continue
+
+            # Bullet must be moving toward the robot
+            if float(np.dot(v_b, pos - p_b)) <= 0.0:
+                continue
+
+            t_cpa = float(np.dot(pos - p_b, v_b)) / float(np.dot(v_b, v_b))
             t_cpa = max(0.0, t_cpa)
-
             if t_cpa > self.dodge_lookahead:
                 continue
 
-            cpa = p + t_cpa * v
-            miss_distance = float(np.linalg.norm(cpa - pos))
-            danger_radius = (
-                obs.radius + self.robot_radius + self.safety_margin
-            ) * self.dodge_danger_factor
+            cpa = p_b + t_cpa * v_b
+            miss_dist = float(np.linalg.norm(cpa - pos))
 
-            if miss_distance > danger_radius:
-                continue
+            if miss_dist > coll_r:
+                continue  # will miss — no action needed
 
-            # Dodge: move perpendicular to projectile velocity
-            perp = np.array([-v[1], v[0]], dtype=float) / speed
-            escape_a = pos + self.dodge_escape_distance * perp
-            escape_b = pos - self.dodge_escape_distance * perp
+            # Track the most imminent (smallest t_cpa) threat
+            if t_cpa < best_t_cpa:
+                best_t_cpa = t_cpa
+                best = (v_b, speed, p_b, t_cpa, cpa, miss_dist, coll_r)
 
-            # Choose the side farther from the projectile's CPA
-            dist_a = float(np.linalg.norm(escape_a - cpa))
-            dist_b = float(np.linalg.norm(escape_b - cpa))
-            escape_target = escape_a if dist_a >= dist_b else escape_b
+        if best is None:
+            return None
 
-            return self._lyapunov_diagnostics(
-                state=(float(pos[0]), float(pos[1]), theta),
-                target=escape_target,
-                mode="dodge",
-                blocking_obstacle_index=None,
-            )
+        v_b, speed, p_b, t_cpa, cpa, miss_dist, coll_r = best
 
-        return None
+        # ── Step 2: determine which side of the bullet's line to move to ────
+        v_hat = v_b / speed
+        perp_pos = np.array([-v_b[1], v_b[0]], dtype=float) / speed  # 90° CCW
+
+        # Perpendicular component from bullet origin to robot — tells us which
+        # side the robot is currently on relative to the bullet's line.
+        proj_to_robot = pos - p_b
+        along = float(np.dot(proj_to_robot, v_hat))
+        perp_vec = proj_to_robot - along * v_hat   # perpendicular offset vector
+        h = float(np.linalg.norm(perp_vec))
+
+        if h > 1e-4:
+            # Continue moving in the same lateral direction (away from bullet line)
+            lateral_dir = perp_vec / h
+        else:
+            # Robot exactly on bullet line — pick side closer to goal
+            side_a = pos + 0.5 * perp_pos
+            side_b = pos - 0.5 * perp_pos
+            if float(np.linalg.norm(side_a - goal_xy)) <= \
+               float(np.linalg.norm(side_b - goal_xy)):
+                lateral_dir = perp_pos
+            else:
+                lateral_dir = -perp_pos
+
+        # ── Step 3: compute Δω to steer in lateral_dir ──────────────────────
+        # Positive ω = CCW = robot turns left.  "Left" in robot frame:
+        left_dir = np.array([-np.sin(theta), np.cos(theta)])
+        omega_sign = 1.0 if float(np.dot(lateral_dir, left_dir)) >= 0.0 else -1.0
+
+        # Magnitude: proportional to threat severity, but intentionally mild.
+        # At lookahead 1.0s and v≥0.7 m/s, Δω=1.5 rad/s gives lateral arc
+        # ≈ 0.5·v·Δω·t² ≈ 0.5·0.7·1.5·1² ≈ 0.5 m — just enough to clear the
+        # hitbox sum (~0.53 m).  Using self.k_alpha (=3.0) here would create
+        # R=v/ω≈0.12 m circles and make the robot spin instead of arc.
+        threat_fraction = max(0.0, (coll_r - miss_dist) / coll_r)
+        _DODGE_W_GAIN = 2.0   # rad/s at max threat — gentle, predictable arc
+        omega_correction = omega_sign * _DODGE_W_GAIN * (0.5 + threat_fraction)
+        # Hard cap: never exceed half the actuator limit (leaves room for v)
+        if self.u_max is not None:
+            max_w = self.u_max / self.b   # half of actuator-max angular rate
+            omega_correction = float(np.clip(omega_correction, -max_w, max_w))
+
+        # ── Step 4: compute normal Lyapunov output toward the nav target ────
+        # If obstacle avoidance is active, keep targeting the current waypoint
+        # so the robot does not steer into obstacles.  Otherwise target goal.
+        # Either way we enforce a minimum forward speed below so the robot never
+        # stalls during a dodge (waypoints behind the robot produce v<0 which
+        # would make us a stationary target — the min-v clamp handles this).
+        if self.obstacle_avoidance_active and self.current_waypoint is not None:
+            nav_target = np.asarray(self.current_waypoint, dtype=float)
+        else:
+            nav_target = goal_xy
+
+        normal_diag = self._lyapunov_diagnostics(
+            state=(float(pos[0]), float(pos[1]), theta),
+            target=nav_target,
+            mode="dodge",
+            blocking_obstacle_index=None,
+        )
+
+        # ── Step 5: inject Δω, enforce minimum forward speed, re-clip ────────
+        new_omega = normal_diag.omega + omega_correction
+        # Clamp v ≥ _MIN_DODGE_V: a moving robot is far harder to hit than a
+        # stationary one.  This is the key fix — previously the avoidance-motion
+        # guard or a large heading error could drive v to zero during dodge.
+        _MIN_DODGE_V = 1.0   # m/s — R = v/ω = 1.0/2.0 = 0.5 m arc, clears 0.53 m hitbox
+        base_v = max(normal_diag.v, _MIN_DODGE_V)
+        u_l, u_r = unicycle_to_tracks(base_v, new_omega, self.b)
+        if self.u_max is not None:
+            u_l = float(np.clip(u_l, -self.u_max, self.u_max))
+            u_r = float(np.clip(u_r, -self.u_max, self.u_max))
+            new_v, new_omega = tracks_to_unicycle(u_l, u_r, self.b)
+        else:
+            new_v = base_v
+            u_l, u_r = unicycle_to_tracks(new_v, new_omega, self.b)
+
+        return ControlDiagnostics(
+            mode="dodge",
+            current_target=normal_diag.current_target,
+            blocking_obstacle_index=None,
+            rho=normal_diag.rho,
+            alpha=normal_diag.alpha,
+            v=new_v,
+            omega=new_omega,
+            u_l=u_l,
+            u_r=u_r,
+            V=normal_diag.V,
+            avoidance_active=self.obstacle_avoidance_active,
+        )
 
     def _clear_avoidance(self) -> None:
         """Reset obstacle-avoidance supervisor state."""

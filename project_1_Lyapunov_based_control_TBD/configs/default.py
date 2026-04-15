@@ -12,7 +12,7 @@ class SimulationConfig:
     initial_state: tuple[float, float, float] = (0.0, 0.0, 0.0)
     command_mode: str = "tracks"
     stop_at_goal: bool = True
-    goal_tolerance: float = 0.05
+    goal_tolerance: float = 0.35
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,16 +41,15 @@ class CannonConfig:
     enabled: bool = True
     x: float = 9.0                    # cannon x position, m
     y: float = -6.0                   # cannon y position, m
-    mean_fire_interval: float = 1.2   # mean seconds between shots (Poisson rate λ = 1/1.2)
+    mean_fire_interval: float = 1.5   # mean seconds between shots (Poisson rate λ = 1/1.5)
     projectile_speed: float = 7.5     # muzzle speed, m/s
     projectile_radius: float = 0.18   # collision radius of each shell, m
-    angular_spread_std: float = 0.07  # Gaussian aim noise std, rad (~4°) — very accurate
+    angular_spread_std: float = 0.10  # Gaussian aim noise std, rad (~6°)
     max_projectile_age: float = 10.0  # seconds until a shell is removed
     seed: int | None = None           # None → different sequence each run
     # Dodge parameters (controller reacts to incoming projectiles)
-    dodge_lookahead: float = 2.5        # seconds to look ahead — more for faster shells
-    dodge_escape_distance: float = 2.2  # metres to step sideways when dodging
-    dodge_danger_factor: float = 1.5    # multiplier on danger radius
+    dodge_lookahead: float = 1.2        # seconds — react early enough to steer clear
+    dodge_danger_factor: float = 1.4   # react to near-misses within 40% buffer
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +60,7 @@ class ControllerConfig:
     k_alpha: float = 3.0
     b: float = 0.52
     u_max: float | None = 2.0
-    eps_goal: float = 0.05
+    eps_goal: float = 0.35
     lyapunov_c: float = 1.0
     robot_radius: float = 0.35
     safety_margin: float = 0.15
@@ -99,7 +98,7 @@ class RandomScenarioConfig:
     validate_scenario: bool = True
     validation_attempts: int = 30
     validation_steps: int = 2000
-    validation_goal_tolerance: float = 0.1
+    validation_goal_tolerance: float = 0.4
 
 
 @dataclass(frozen=True, slots=True)
