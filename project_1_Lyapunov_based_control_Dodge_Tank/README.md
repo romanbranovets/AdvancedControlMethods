@@ -190,15 +190,15 @@ When a circular obstacle lies on the straight-line path to the goal, the control
 
 When the cannon fires, a **Closest-Point-of-Approach** (CPA) check is applied to each live projectile:
 
-1. Compute $t_{\text{CPA}} = \dfrac{(\mathbf{x} - \mathbf{p}) \cdot \mathbf{v}_{\text{proj}}}{\|\mathbf{v}_{\text{proj}}\|^2}$.
-2. Miss distance $d = \|\mathbf{x}(t_{\text{CPA}}) - \mathbf{g}_{\text{proj}}(t_{\text{CPA}})\|$ where $\mathbf{g}_{\text{proj}}(t)$ is the projected projectile position.
-3. If $d \le (r_{\text{robot}} + r_{\text{proj}}) \cdot f_{\text{danger}}$ and $t_{\text{CPA}} \le T_{\text{lookahead}}$, compute a **route correction** target:
+1. Compute $t_\mathrm{CPA} = \dfrac{(\mathbf{x} - \mathbf{p}) \cdot \mathbf{v}_p}{\|\mathbf{v}_p\|^2}$.
+2. Miss distance $d = \|\mathbf{x}(t_\mathrm{CPA}) - \mathbf{p}(t_\mathrm{CPA})\|$ where $\mathbf{p}(t)$ is the projected projectile position.
+3. If $d \le (r_\mathrm{robot} + r_\mathrm{proj}) \cdot f_\mathrm{danger}$ and $t_\mathrm{CPA} \le T_\mathrm{lookahead}$, compute a **route correction** target:
 
 $$
-\mathbf{e}_{\text{target}} = \mathbf{x} + \ell_{\text{fwd}}\,\hat{\mathbf{d}}_{\text{goal}} + d_{\text{lat}}\,\hat{\mathbf{n}}_{\perp}
+\mathbf{e}_\mathrm{target} = \mathbf{x} + \ell_\mathrm{fwd} \hat{\mathbf{d}}_\mathrm{goal} + d_\mathrm{lat} \hat{\mathbf{n}}_\perp
 $$
 
-where $\hat{\mathbf{d}}_{\text{goal}}$ is the unit vector toward the goal, $\hat{\mathbf{n}}_\perp$ is perpendicular to the bullet flight direction, $d_{\text{lat}}$ is the minimum lateral clearance, and $\ell_{\text{fwd}} = 3 d_{\text{lat}}$ keeps the robot moving mostly forward.  The side with smaller distance to goal is preferred.  The Lyapunov controller then targets $\mathbf{e}_{\text{target}}$; once the projectile passes the approaching-gate check the controller returns instantly to normal goal tracking.
+where $\hat{\mathbf{d}}_\mathrm{goal}$ is the unit vector toward the goal, $\hat{\mathbf{n}}_\perp$ is perpendicular to the bullet flight direction, $d_\mathrm{lat}$ is the minimum lateral clearance, and $\ell_\mathrm{fwd} = 3 d_\mathrm{lat}$ keeps the robot moving mostly forward.  The side with smaller distance to goal is preferred.  The Lyapunov controller then targets $\mathbf{e}_\mathrm{target}$; once the projectile passes the approaching-gate check the controller returns instantly to normal goal tracking.
 
 **Key design choice:** the escape target is deliberately placed forward-plus-lateral (not purely sideways), so the dodge barely deflects the nominal trajectory.  This keeps the Lyapunov function $V$ from rising excessively during avoidance, and $V$ resumes its monotone decrease as soon as the threat clears.
 
@@ -207,7 +207,7 @@ where $\hat{\mathbf{d}}_{\text{goal}}$ is the unit vector toward the goal, $\hat
 Gaussian noise $({\sigma_x, \sigma_y} = 0.03\text{ m},\; \sigma_\theta = 0.015\text{ rad})$ is added to the observed state before each control step to model GPS/IMU imperfections.  An Exponential Moving Average (EMA) filter with $\alpha_{\text{EMA}} = 0.55$ is applied to smooth measurements:
 
 $$
-\hat{\mathbf{s}}_{k} = \alpha_{\text{EMA}}\,\tilde{\mathbf{s}}_k + (1-\alpha_{\text{EMA}})\,\hat{\mathbf{s}}_{k-1}
+\hat{\mathbf{s}}_{k} = \alpha_\mathrm{EMA} \tilde{\mathbf{s}}_k + (1 - \alpha_\mathrm{EMA}) \hat{\mathbf{s}}_{k-1}
 $$
 
 where $\tilde{\mathbf{s}}_k$ is the noisy measurement.  The simulator integrates the **true** state; only the controller input is noisy.
