@@ -1,6 +1,6 @@
 # Project 1 — Lyapunov-Based Control of a Tracked Robot
 
-> **Course:** Advanced Control Methods, Skoltech 2026  
+
 > **Topic:** Lyapunov stabilization for a nonlinear unicycle-like system  
 > **Task:** Drive a differential-drive tracked robot from an arbitrary initial pose to a goal position in a cluttered environment under sensor noise and projectile disturbances
 
