@@ -328,6 +328,8 @@ uv sync
 
 ```bash
 python main.py --animate --episodes 1
+# or, with uv:
+uv run main.py --animate --episodes 1
 ```
 
 Use `--seed 42` for a reproducible scenario, `--no-random` for the fixed start from config.
@@ -346,6 +348,8 @@ Use `--seed 42` for a reproducible scenario, `--no-random` for the fixed start f
 
 ```bash
 python scripts/generate_report.py
+# or, with uv:
+uv run scripts/generate_report.py
 ```
 
 Produces:
