@@ -25,9 +25,14 @@ def run_simulation(system: QuadcopterSystem,
                    t_max: float = 15.0,
                    dt: float = 0.005,
                    stop_tolerance: float = 0.3,
-                   stop_speed: float = 0.3,
+                   stop_speed=None,
                    yaw_d: float = 0.0,
                    verbose: bool = True):
+    """
+    Stop conditions:
+      - dist(pos, target) < stop_tolerance     (epsilon-ball reached)
+      - if `stop_speed` is given (float), additionally require speed < stop_speed
+    """
     t = 0.0
     state = initial_state.copy()
     controller.reset()
@@ -57,7 +62,10 @@ def run_simulation(system: QuadcopterSystem,
 
         dist = np.linalg.norm(state[0:3] - target)
         speed = np.linalg.norm(state[3:6])
-        if dist < stop_tolerance and speed < stop_speed:
+        reached = dist < stop_tolerance
+        if stop_speed is not None:
+            reached = reached and (speed < stop_speed)
+        if reached:
             if verbose:
                 print(f"[sim] target reached at t={t:.2f}s, dist={dist:.3f}m, speed={speed:.3f}m/s")
             break
