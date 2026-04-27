@@ -1,301 +1,316 @@
-# MRAC + σ-modification: подробное описание
+# MRAC + σ-modification: detailed description
 
-Здесь полное обоснование адаптивной части контроллера дрона. Документ написан так,
-чтобы можно было защититься от вопросов «почему это работает», «откуда взялась
-формула» и «что гарантирует теория». Все выкладки — для одного канала скорости
-(остальные два — копии).
+This document gives the full justification of the adaptive part of the
+drone controller. It is written so that one can defend the design against
+questions of the form "why does this work", "where does this formula come
+from", and "what does the theory guarantee". All derivations are written
+out for a single velocity axis (the other two are identical copies).
 
-## Содержание
+## Contents
 
-1. [Зачем вообще adaptive control](#1-зачем-вообще-adaptive-control)
-2. [Объект управления (Plant)](#2-объект-управления-plant)
-3. [Эталонная модель (Reference Model)](#3-эталонная-модель-reference-model)
-4. [Закон управления](#4-закон-управления)
-5. [Динамика ошибки слежения](#5-динамика-ошибки-слежения)
-6. [Функция Ляпунова и закон обновления](#6-функция-ляпунова-и-закон-обновления)
-7. [σ-modification: зачем нужно](#7-σ-modification-зачем-нужно)
+1. [Why adaptive control at all](#1-why-adaptive-control-at-all)
+2. [Plant](#2-plant)
+3. [Reference Model](#3-reference-model)
+4. [Control law](#4-control-law)
+5. [Tracking-error dynamics](#5-tracking-error-dynamics)
+6. [Lyapunov function and update law](#6-lyapunov-function-and-update-law)
+7. [σ-modification: why we need it](#7-σ-modification-why-we-need-it)
 8. [Adaptation freeze on saturation](#8-adaptation-freeze-on-saturation)
-9. [Проекция параметров](#9-проекция-параметров)
-10. [Регрессор Φ(v) и почему такой выбор](#10-регрессор-φv-и-почему-такой-выбор)
-11. [Почему MRAC на скоростном контуре, а не на угловом](#11-почему-mrac-на-скоростном-контуре-а-не-на-угловом)
-12. [Что гарантирует теория, а что нет](#12-что-гарантирует-теория-а-что-нет)
-13. [Связь с PID baseline](#13-связь-с-pid-baseline)
-14. [Параметры и их подбор](#14-параметры-и-их-подбор)
-15. [Литература](#15-литература)
+9. [Parameter projection](#9-parameter-projection)
+10. [The regressor Φ(v) and the choice behind it](#10-the-regressor-φv-and-the-choice-behind-it)
+11. [Why MRAC on the velocity loop, not the angular loop](#11-why-mrac-on-the-velocity-loop-not-the-angular-loop)
+12. [What the theory guarantees and what it does not](#12-what-the-theory-guarantees-and-what-it-does-not)
+13. [Connection to the PID baseline](#13-connection-to-the-pid-baseline)
+14. [Parameters and how to tune them](#14-parameters-and-how-to-tune-them)
+15. [References](#15-references)
 
 ---
 
-## 1. Зачем вообще adaptive control
+## 1. Why adaptive control at all
 
-Классический PID работает идеально, **когда модель объекта известна**, а возмущения
-малы и стационарны. Реальный дрон под ветром — обратное:
+A classical PID works perfectly **when the plant model is known** and the
+disturbances are small and stationary. A real drone in wind is the
+opposite:
 
-| Источник неопределённости | Влияние |
+| Source of uncertainty | Effect |
 |---|---|
-| Аэродинамическое сопротивление `F_drag(v_rel)` | Зависит от скорости, плохо моделируется |
-| Ветер `v_wind(t)` | Время-зависимый, неизвестен заранее |
-| Неточности массы / инерции | Сдвигают компенсацию гравитации |
-| Неучтённая динамика моторов / запаздывания | Ошибки в полосе пропускания |
+| Aerodynamic drag $F_{\rm drag}(v_{\rm rel})$ | velocity-dependent, hard to model |
+| Wind $v_w(t)$ | time-varying, unknown a priori |
+| Mass / inertia inaccuracies | shift gravity compensation |
+| Unmodelled motor dynamics / lags | bandwidth errors |
 
-Adaptive control решает это, **меняя параметры регулятора в реальном времени**
-так, чтобы плант вёл себя как фиксированный «эталон». Меняются именно параметры,
-а не только сигнал управления — это и отличает adaptive от просто robust.
+Adaptive control addresses this by **changing controller parameters in real
+time** so that the plant behaves like a fixed reference model. It is the
+parameter update — not just the control signal — that distinguishes
+adaptive from merely robust control.
 
-**MRAC** (Model Reference Adaptive Control) — один из канонических подходов:
-эталон задаётся явно как линейная стабильная модель `ẋ_m = A_m x_m + B_m r`,
-а параметры адаптера обновляются, чтобы плант → эталон.
+**MRAC** (Model Reference Adaptive Control) is one of the canonical
+approaches: an explicit linear stable model `ẋ_m = A_m x_m + B_m r` is
+posted, and the adapter parameters are updated so that plant → reference
+model.
 
 ---
 
-## 2. Объект управления (Plant)
+## 2. Plant
 
-Берём один канал скорости (например, `v_x`). Линеаризованная модель:
+Take a single velocity axis (e.g. $v_x$). Linearised model:
 
 ```
 v̇ = u + Δ(v, t)
 ```
 
-- `v` — скорость дрона по оси x (в мировой системе)
-- `u` — командная горизонтальная составляющая ускорения, выход регулятора
-       (потом конвертируется в крен/тангаж и тягу)
-- `Δ(v, t)` — **неизвестное возмущение**: drag, ветер, вибрации, ошибки модели
+- `v` — drone velocity along axis x (in the world frame)
+- `u` — commanded horizontal acceleration component, controller output
+       (later converted into roll/pitch and thrust)
+- `Δ(v, t)` — **unknown disturbance**: drag, wind, vibrations, modelling
+  errors
 
-Допущение MRAC: `Δ` **линейна по неизвестным параметрам** (linear-in-parameters):
+MRAC assumption: `Δ` is **linear in unknown parameters** (linear-in-parameters):
 
 ```
 Δ(v, t) = Θ*ᵀ · Φ(v)
 ```
 
-где:
-- `Φ(v) ∈ ℝⁿ` — известный **регрессор** (basis functions), функция состояния
-- `Θ* ∈ ℝⁿ` — **истинные** константные параметры, неизвестны
+where:
+- `Φ(v) ∈ ℝⁿ` — known **regressor** (basis functions), function of state
+- `Θ* ∈ ℝⁿ` — **true** constant parameters, unknown
 
-В нашем коде регрессор по умолчанию (`n_basis=3`):
+In our code the default regressor (`n_basis=3`) is
 
 ```
-Φ(v) = [ 1,  v,  |v|·v ]ᵀ
+Φ(v) = [ 1,  v,  |v|·v ]ᵀ.
 ```
 
-Это покрывает:
-- константный bias (постоянный ветер)
-- линейный drag
-- квадратичный drag
+It captures
+- a constant bias (mean wind),
+- linear drag,
+- quadratic drag.
 
-Если истинная физика — именно `−c₁(v − v_w) − c₂|v − v_w|(v − v_w)`, то Δ
-**не вполне линейна по параметрам** относительно Φ(v) (там есть `v_w(t)`,
-зависящий от времени, а не только от состояния). Поэтому `Θ*` не существует
-как точная константа — но MRAC всё равно работает, потому что:
-- σ-модификация (см. §7) обеспечивает ограниченность параметров
-- адаптация не зависит от точного выполнения linear-in-parameters
-- мы получаем UUB, а не асимптотическую сходимость к нулю
+If the true physics is exactly `−c₁(v − v_w) − c₂|v − v_w|(v − v_w)` then
+Δ is **not strictly linear in our parameters with respect to Φ(v)**
+(because of `v_w(t)` which depends on time, not on state). Therefore an
+exact constant `Θ*` does not strictly exist — but MRAC still works,
+because:
+- σ-modification (see §7) keeps the parameters bounded;
+- the adaptation does not depend on the exact linear-in-parameters
+  property holding;
+- we obtain UUB rather than asymptotic convergence to zero error.
 
 ---
 
-## 3. Эталонная модель (Reference Model)
+## 3. Reference Model
 
-Желаемое поведение объекта:
+The desired behaviour of the plant:
 
 ```
 v̇_m = -a_m (v_m - v_des)
 ```
 
-`a_m > 0` — собственная частота эталона. Это устойчивое 1-го порядка звено:
-если `v_des` константа, `v_m → v_des` экспоненциально с константой времени `1/a_m`.
+with `a_m > 0` the natural rate of the reference model. This is a stable
+first-order system: if `v_des` is constant then `v_m → v_des`
+exponentially with time constant `1/a_m`.
 
-В коде значения по умолчанию: `a_m_xy = 6.0`, `a_m_z = 8.0`, что соответствует
-постоянной времени **170 мс** для горизонтальных каналов и **125 мс** для
-вертикали. Эти значения должны быть:
-- **выше**, чем полоса пропускания внутреннего контура (углового PID), чтобы
-  не выходить за пределы быстродействия плотно (иначе `v` не успеет за `v_m`)
-- **выше**, чем характерные частоты возмущения (ветер до ~3 рад/с в нашей
-  модели)
-- **ниже**, чем 2π/dt чтобы устойчиво интегрироваться
+In code the defaults are `a_m_xy = 6.0` and `a_m_z = 8.0`, i.e. time
+constants of **170 ms** for the horizontal axes and **125 ms** for the
+vertical one. They should be:
+- **higher** than typical wind frequencies (here up to ~3 rad/s) so that
+  the reference model can track them,
+- **lower** than the inner attitude loop's bandwidth (otherwise the plant
+  cannot follow the reference),
+- well below the discretisation Nyquist (`a_m · dt ≪ 2`).
 
-В реализации интегрирование точное (1-го порядка линейно):
+The reference model integration is **exact** (first-order linear, constant
+input on each step):
 
 ```python
 decay = exp(-a_m * dt)
 v_m   = v_des + (v_m - v_des) * decay
 ```
 
-— точная формула для линейного 1-го порядка с постоянным входом на интервале
-`[t, t + dt]`. Это устраняет проблему forward-Euler, которая в первой итерации
-давала фантомную ошибку e ≠ 0 при `v = v_m = 0`.
+This is the closed-form solution of the linear first-order ODE on
+`[t, t + dt]`. It removes the spurious "phantom error" that forward Euler
+produced in the very first iteration when `v = v_m = 0`.
 
 ---
 
-## 4. Закон управления
+## 4. Control law
 
-Идея: подобрать `u` так, чтобы при `Δ ≡ 0` плант **точно** воспроизводил
-эталон.
+Idea: choose `u` so that, in the absence of `Δ`, the plant **exactly**
+reproduces the reference model:
 
 ```
 u = a_m (v_des - v) - Θ̂ᵀ Φ(v)
        ↑                ↑
-       |                └── adaptive часть, оценка возмущения
-       └── nominal часть, как у P-контроллера на ошибке скорости
+       |                └── adaptive part, disturbance estimate
+       └── nominal part, like a P-controller on velocity error
 ```
 
-Если бы мы знали `Θ*`, идеальный `u = a_m(v_des - v) - Θ*ᵀΦ(v)` сделал бы:
+If we knew `Θ*`, the ideal `u = a_m(v_des - v) - Θ*ᵀ Φ(v)` would give
 
 ```
-v̇ = u + Θ*ᵀΦ = a_m(v_des - v) - Θ*ᵀΦ + Θ*ᵀΦ = a_m(v_des - v)
+v̇ = u + Θ*ᵀ Φ = a_m(v_des - v) - Θ*ᵀ Φ + Θ*ᵀ Φ = a_m(v_des - v)
 ```
 
-— ровно эталонная динамика. Значит **`Θ̂` должно стремиться к Θ*** (или хотя бы
-дать `(Θ̂ - Θ*)ᵀΦ` близкое к нулю).
+— exactly the reference dynamics. Therefore **`Θ̂` should drive
+`Θ̃ᵀ Φ` close to zero** (or, more precisely, push the closed-loop into
+that regime).
 
 ---
 
-## 5. Динамика ошибки слежения
+## 5. Tracking-error dynamics
 
-Определим **tracking error** `e = v - v_m`. Подставляем закон управления:
+Define the **tracking error** `e = v - v_m`. Substituting the control law:
 
 ```
 v̇ = u + Δ
-   = a_m(v_des - v) - Θ̂ᵀΦ + Θ*ᵀΦ
-   = a_m(v_des - v) + (Θ* - Θ̂)ᵀΦ
-   = a_m(v_des - v) + Θ̃ᵀΦ
+   = a_m(v_des - v) - Θ̂ᵀ Φ + Θ*ᵀ Φ
+   = a_m(v_des - v) + (Θ* - Θ̂)ᵀ Φ
+   = a_m(v_des - v) + Θ̃ᵀ Φ
 ```
 
-где `Θ̃ = Θ* - Θ̂` — **parameter error** (неизвестна, но фигурирует в анализе).
+where `Θ̃ = Θ* - Θ̂` is the **parameter error** (unknown, but used in the
+analysis).
 
 ```
 v̇_m = a_m(v_des - v_m)
 ```
 
-Вычитаем:
+Subtracting:
 
 ```
 ė = v̇ - v̇_m
-  = a_m(v_des - v) + Θ̃ᵀΦ - a_m(v_des - v_m)
-  = -a_m(v - v_m) + Θ̃ᵀΦ
-  = -a_m·e + Θ̃ᵀΦ
+  = a_m(v_des - v) + Θ̃ᵀ Φ - a_m(v_des - v_m)
+  = -a_m(v - v_m) + Θ̃ᵀ Φ
+  = -a_m·e + Θ̃ᵀ Φ
 ```
 
-**Ключевое уравнение**: `ė = -a_m·e + Θ̃ᵀΦ`. Это автономная стабильная система
-с возмущением, пропорциональным ошибке параметров.
+**Key equation**: `ė = -a_m·e + Θ̃ᵀ Φ`. This is a stable autonomous system
+with a perturbation proportional to the parameter error.
 
 ---
 
-## 6. Функция Ляпунова и закон обновления
+## 6. Lyapunov function and update law
 
-Кандидат:
+Candidate:
 
 ```
 V = ½ e² + 1/(2γ) ||Θ̃||²,    γ > 0
 ```
 
-Сразу видно, что V положительно определена и V → ∞ при ‖(e, Θ̃)‖ → ∞.
+It is positive definite and `V → ∞` as `‖(e, Θ̃)‖ → ∞`.
 
-Производная вдоль траектории:
+Time derivative along trajectories:
 
 ```
 V̇ = e·ė + (1/γ) Θ̃ᵀ Θ̃̇
-  = e·(-a_m·e + Θ̃ᵀΦ) + (1/γ) Θ̃ᵀ Θ̃̇
-  = -a_m e² + e Θ̃ᵀΦ + (1/γ) Θ̃ᵀ Θ̃̇
+  = e·(-a_m·e + Θ̃ᵀ Φ) + (1/γ) Θ̃ᵀ Θ̃̇
+  = -a_m e² + e Θ̃ᵀ Φ + (1/γ) Θ̃ᵀ Θ̃̇
 ```
 
-`Θ*` — **константа**, поэтому `Θ̃̇ = -Θ̂̇`. Перегруппируем:
+`Θ*` is a **constant**, so `Θ̃̇ = -Θ̂̇`. Rearranging:
 
 ```
 V̇ = -a_m e² + Θ̃ᵀ (e Φ - (1/γ) Θ̂̇)
 ```
 
-Чтобы убрать неизвестное слагаемое, выбираем закон обновления так, чтобы
-скобка обратилась в нуль:
+To kill the unknown term, choose the update law so that the bracket is
+zero:
 
 ```
-Θ̂̇ = γ · e · Φ(v)        ← базовый MRAC закон
+Θ̂̇ = γ · e · Φ(v)        ← basic MRAC law
 ```
 
-Тогда:
+Then
 
 ```
 V̇ = -a_m·e² ≤ 0
 ```
 
-По теореме Барбалат: `e → 0` при `t → ∞`. Параметры `Θ̂` ограничены, но
-**не обязаны сходиться к Θ\***. Сходимость требует **persistent excitation**
-(PE) — Φ должен быть «достаточно богатым» во времени:
+By Barbalat's lemma `e → 0` as `t → ∞`. The parameters `Θ̂` are bounded
+but **not necessarily convergent to `Θ*`**. Convergence requires
+**persistent excitation** (PE) — `Φ` must be "rich enough" in time:
 
 ```
 ∃ T, α > 0:   ∫_t^{t+T} Φ(τ) Φ(τ)ᵀ dτ ≥ α·I    ∀ t
 ```
 
-В нашей задаче это **не гарантировано** (см. §12).
+In our task this is **not guaranteed** (see §12).
 
 ---
 
-## 7. σ-modification: зачем нужно
+## 7. σ-modification: why we need it
 
-Базовый закон `Θ̂̇ = γ·e·Φ` имеет тонкую проблему: при отсутствии PE и наличии
-неучтённых возмущений (шум измерений, нелинейности вне Φ) параметры могут
-**медленно дрейфовать** (parameter drift), пока не упрутся во что-то численно.
+The basic update law `Θ̂̇ = γ·e·Φ` has a subtle problem: in the absence of
+PE and in the presence of unmodelled disturbances (measurement noise,
+nonlinearities outside `Φ`) parameters can **slowly drift** until they hit
+some numerical bound.
 
-**σ-modification** (Ioannou, 1984) добавляет «утечку»:
+**σ-modification** (Ioannou, 1984) adds a "leak":
 
 ```
-Θ̂̇ = γ·e·Φ - σ·Θ̂,    σ > 0
+Θ̂̇ = γ · e · Φ - σ · Θ̂,    σ > 0
 ```
 
-Член `-σ·Θ̂` тянет параметры обратно к нулю, когда `e` мало.
+The term `-σ·Θ̂` pulls the parameters back toward zero whenever `e` is
+small.
 
-Лиапунов:
+Lyapunov:
 
 ```
 V̇ = -a_m e² + Θ̃ᵀ (e Φ - (1/γ) Θ̂̇)
-   = -a_m e² + Θ̃ᵀ (e Φ - eΦ + (σ/γ)·Θ̂)        ← подставили закон
+   = -a_m e² + Θ̃ᵀ (e Φ - eΦ + (σ/γ)·Θ̂)        ← substituted update law
    = -a_m e² + (σ/γ) Θ̃ᵀ Θ̂
 ```
 
-Используем `Θ̂ = Θ* - Θ̃`:
+Using `Θ̂ = Θ* - Θ̃`:
 
 ```
 V̇ = -a_m e² + (σ/γ)·Θ̃ᵀ(Θ* - Θ̃)
-   = -a_m e² - (σ/γ)·||Θ̃||² + (σ/γ)·Θ̃ᵀΘ*
+   = -a_m e² - (σ/γ)·||Θ̃||² + (σ/γ)·Θ̃ᵀ Θ*
 ```
 
-Применяя неравенство Юнга `Θ̃ᵀΘ* ≤ ½||Θ̃||² + ½||Θ*||²`:
+By Young's inequality `Θ̃ᵀΘ* ≤ ½||Θ̃||² + ½||Θ*||²`:
 
 ```
 V̇ ≤ -a_m e² - (σ/2γ)·||Θ̃||² + (σ/2γ)·||Θ*||²
 ```
 
-`V̇ ≤ 0` вне множества:
+`V̇ ≤ 0` outside the set
 
 ```
 { (e, Θ̃) :  a_m e² + (σ/2γ)||Θ̃||² ≤ (σ/2γ)||Θ*||² }
 ```
 
-Это эллипсоид радиуса ~ `||Θ*||` вокруг нуля. **Uniformly Ultimately Bounded
-(UUB)** — траектории попадают и остаются внутри.
+— an ellipsoid of radius ~ `||Θ*||` around the origin. This is **uniform
+ultimate boundedness (UUB)**: trajectories enter the set and stay there.
 
-**Цена** σ-modification: добавочная ошибка в установившемся режиме порядка
-σ·||Θ*||. Чем больше σ — тем меньше дрейф, но больше bias. Компромисс:
-у нас **σ = 0.5**, эмпирически даёт хорошее равновесие.
+**Cost** of σ-modification: an additional steady-state error of order
+`σ·||Θ*||`. Larger σ → less drift, more bias. Trade-off: we use **σ = 0.5**,
+which empirically gives a good balance.
 
-Альтернативы: e-modification (`Θ̂̇ = γ·e·Φ - σ·||e||·Θ̂`) — leakage только когда
-ошибка велика; dead-zone — отключать адаптацию при малой ошибке.
+Alternatives: e-modification (`Θ̂̇ = γ·e·Φ - σ·||e||·Θ̂`) — leakage only when
+the error is large; dead-zone — disable adaptation below an error
+threshold.
 
 ---
 
 ## 8. Adaptation freeze on saturation
 
-Управление `u` физически ограничено (max наклон 15° → max acceleration ≈ g·tan(15°)).
-Когда `u_unsat` превосходит лимит, в систему идёт усечённое значение:
+The control input `u` is physically bounded (max tilt 15° → max horizontal
+acceleration ≈ g·tan(15°)). When `u_unsat` exceeds the limit, the system
+receives the clipped signal:
 
 ```
 u = clip(u_unsat, -u_max, u_max)
 ```
 
-При насыщении ошибка `e` растёт **не из-за плохих параметров**, а из-за
-нехватки control authority. Если в этот момент адаптировать, `Θ̂` поедет
-в неверную сторону (попытается «выкомпенсировать» через бóльшие коэффициенты,
-но их выдают через тот же ограниченный канал — получается positive feedback
-в адаптации).
+Under saturation the error `e` grows **not because of poor parameters** but
+because of insufficient control authority. Adapting at this moment would
+push `Θ̂` in the wrong direction (it would try to "compensate" by
+producing larger commands, but those go through the same saturated channel,
+creating positive feedback in adaptation).
 
-В коде:
+In code:
 
 ```python
 saturated = (u != u_unsat)
@@ -303,249 +318,260 @@ if not saturated:
     Θ̂ += dt · (γ · e · Φ - σ · Θ̂)
 ```
 
-Теоретически: при насыщении **прекращаем обучение**, но closed-loop по-прежнему
-устойчив за счёт ограниченной траектории и σ-mod. Это известный приём,
-обсуждается в Lavretsky & Wise §10.2 (saturation handling). Без него под сильным
-ветром `Θ̂` улетал в проекцию и алгоритм выдавал worse-than-PID результат
-(см. историю экспериментов).
+In theory: stop learning during saturation; the closed loop remains stable
+through bounded trajectory + σ-mod. This is a known technique discussed in
+Lavretsky & Wise §10.2 (saturation handling). Without it, `Θ̂` drifted into
+the projection bound under strong wind and the algorithm performed worse
+than PID (this was observed during development).
 
 ---
 
-## 9. Проекция параметров
+## 9. Parameter projection
 
-Дополнительно:
+Additionally:
 
 ```python
 if ||Θ̂|| > θ_max:
     Θ̂ ← Θ̂ · θ_max / ||Θ̂||
 ```
 
-— безопасная **projection onto bounded set**. Это hard limit на случай если
-σ-modification и saturation freeze не справятся (численные сбои, экстремальные
-переходные процессы). По теории, projection не нарушает свойств Lyapunov
-если выбрана корректно (см. Lavretsky §11.4).
+— a safe **projection onto a bounded set**. This is a hard limit in case
+σ-modification and saturation freeze are insufficient (numerical hiccups,
+extreme transients). By construction, projection does not break the
+Lyapunov properties of the scheme (see Lavretsky §11.4).
 
-В нашем коде `θ_max = 8.0`. С регрессором `Φ(v)` максимальная величина
-`Θ̂ᵀΦ` при `v = 5 м/с` и `n_basis = 3`:
-`||Θ̂|| · ||Φ|| = 8 · √(1 + 25 + 625) ≈ 8 · 25.5 ≈ 200 м/с²` — намного больше любой
-реалистичной компенсации. Лимит мягкий и почти никогда не активируется.
+We use `θ_max = 8.0`. With the regressor `Φ(v)` and `n_basis = 3`, the
+maximum value of `Θ̂ᵀ Φ` at `v = 5 m/s` is at most
+`||Θ̂|| · ||Φ|| = 8 · √(1 + 25 + 625) ≈ 8 · 25.5 ≈ 200 m/s²` — far above any
+realistic compensation. The limit is loose and almost never engages.
 
 ---
 
-## 10. Регрессор Φ(v) и почему такой выбор
+## 10. The regressor Φ(v) and the choice behind it
 
 ```
 Φ(v) = [ 1,  v,  |v|·v ]ᵀ
 ```
 
-| Член | Что моделирует | Параметр Θ̂ |
+| Term | What it models | Parameter Θ̂ |
 |---|---|---|
-| `1` | Постоянный bias (mean wind, gravity offset) | Θ̂_0 |
-| `v` | Линейный drag `c₁·v` | Θ̂_1 |
-| `|v|·v` | Квадратичный drag `c₂·v\|v\|` | Θ̂_2 |
+| `1` | constant bias (mean wind, gravity offset) | Θ̂_0 |
+| `v` | linear drag `c₁·v` | Θ̂_1 |
+| `|v|·v` | quadratic drag `c₂·v\|v\|` | Θ̂_2 |
 
-**Истинное** возмущение в модели:
+The **true** disturbance in the model is
 
 ```
 δ_true(v, t) = (1/m) [ -c₁(v - v_w(t)) - c₂|v - v_w(t)|(v - v_w(t)) ]
 ```
 
-Это **не** линейная комбинация наших Φ — присутствует `v_w(t)`, который меняется.
-Лучшая аппроксимация:
-- Θ̂_0 ловит mean drag = `(c₁ ⟨v_w⟩ + c₂ ⟨|v_w| v_w⟩) / m`
+This is **not** a linear combination of our `Φ(v)` — `v_w(t)` shows up,
+which is time-varying. The best approximation is:
+- Θ̂_0 captures the mean drag = `(c₁ ⟨v_w⟩ + c₂ ⟨|v_w| v_w⟩) / m`
 - Θ̂_1 ≈ -c₁/m
 - Θ̂_2 ≈ -c₂/m
 
-Но из-за нестационарного `v_w` параметры **флуктуируют** вокруг этих средних.
+Because `v_w` is non-stationary, the parameters **fluctuate** around these
+means.
 
-**Альтернативные регрессоры**:
-- Φ = [1] — только bias-компенсация (если ветер ~ константа)
-- Φ = [1, v, v², sin(ωt), cos(ωt)] — добавить time-varying basis (если знаем
-  доминирующую частоту)
-- Φ = радиальные базисные функции (RBF) — universal approximator
+**Alternative regressors**:
+- `Φ = [1]` — bias compensation only (if the wind is roughly constant)
+- `Φ = [1, v, v², sin(ωt), cos(ωt)]` — add a time-varying basis (if the
+  dominant frequency is known)
+- `Φ` = radial basis functions (RBF) — universal approximator
 
-В коде есть параметр `n_basis ∈ {1, 2, 3}` для упрощения.
+The code exposes a parameter `n_basis ∈ {1, 2, 3}` for simplification.
 
 ---
 
-## 11. Почему MRAC на скоростном контуре, а не на угловом
+## 11. Why MRAC on the velocity loop, not the angular loop
 
-Изначально (исторически в литературе) MRAC ставят на **угловую** динамику:
+Historically (in textbooks) MRAC is placed on the **angular** dynamics:
 
 ```
 ω̇ = (1/I)·τ + (1/I)·δ_τ
 ```
 
-Это естественно для F-16 / аппаратов с большой неопределённостью в моменте
-(failure mode, повреждения).
+This is natural for fighter jets / craft with high uncertainty in the
+torque channel (failure modes, damage).
 
-Для дрона с ветром:
-- Угловая динамика **отлично смоделирована** — там почти нет неопределённости
-- Возмущение от ветра входит **не как момент**, а как **сила drag** на корпусе
-- MRAC на угле эстимирует «нечего» → улучшение мало (мы это видели: +3% от PID)
+For a drone in wind:
+- The angular dynamics are **very well modelled** — there is little
+  uncertainty.
+- The wind disturbance does **not enter as a torque**, but as a **drag
+  force** on the body.
+- MRAC on the angular loop estimates "nothing" → improvement is small (we
+  observed ~3 % over PID).
 
-Перенос MRAC на скорость даёт:
-- δ напрямую соответствует drag, **есть что эстимировать**
-- регрессор Φ(v) физически осмысленный
-- вторая адаптация на углах не нужна (PID справляется)
+Moving MRAC to the velocity loop:
+- `δ` corresponds directly to drag — there is **something to estimate**;
+- the regressor `Φ(v)` is physically meaningful;
+- a second adaptation on the angular loop is unnecessary (PID is sufficient
+  there).
 
-Это видно в экспериментах: MRAC на углах +3%, MRAC на скорости **+44%** на
-moderate ветре.
+This is reflected in the experiments: angular MRAC +3 %, velocity MRAC
+**+44 %** under moderate wind.
 
-В курсе Lavretsky это называется *outer-loop MRAC* и обсуждается в главе про
-guidance & control architecture.
+In Lavretsky's terminology this is called *outer-loop MRAC* and is
+discussed in the chapter on guidance & control architecture.
 
 ---
 
-## 12. Что гарантирует теория, а что нет
+## 12. What the theory guarantees and what it does not
 
-### Гарантирует
+### Guaranteed
 
-1. **Boundedness**: все сигналы `(v, v_m, e, Θ̂)` ограничены при `t → ∞`.
-   Доказательство: V — radially unbounded, V̇ ≤ 0 вне UUB-эллипсоида.
-2. **Tracking error UUB**: `||e||` стремится к ограниченному множеству
-   радиуса `O(σ·||Θ*||/a_m)`. На практике: `||e|| → ε`, где `ε` — малое
-   число (в нашем случае ≤ 0.5 м/с под ветром).
-3. **Stability** в смысле Lyapunov.
+1. **Boundedness**: all signals `(v, v_m, e, Θ̂)` are bounded as `t → ∞`.
+   Proof: `V` is radially unbounded and `V̇ ≤ 0` outside the UUB
+   ellipsoid.
+2. **Tracking-error UUB**: `||e||` enters a bounded set of radius
+   `O(σ·||Θ*||/a_m)`. In practice, `||e||` settles into a small
+   neighborhood (in our case ≤ 0.5 m/s under wind).
+3. **Stability** in the sense of Lyapunov.
 
-### **НЕ** гарантирует
+### **NOT** guaranteed
 
-1. **Сходимость `Θ̂ → Θ*`**. Для этого нужна **persistent excitation**:
+1. **Convergence `Θ̂ → Θ*`**. This requires **persistent excitation** (PE):
 
    ```
    ∃ T, α > 0:  ∫_t^{t+T} Φ(v(τ)) Φ(v(τ))ᵀ dτ ≥ α·I
    ```
 
-   У нас Φ(v) = [1, v, |v|·v]. Когда дрон в окрестности цели, `v ≈ 0`, и
-   Φ ≈ [1, 0, 0]ᵀ — матрица вырождена, PE нарушено. Поэтому, хотя дрон
-   точно стоит в цели, оценка `Θ̂_1, Θ̂_2` может быть неточной.
+   Our `Φ(v) = [1, v, |v|·v]`. When the drone is near the target,
+   `v ≈ 0`, so `Φ ≈ [1, 0, 0]ᵀ` — the matrix is rank-deficient and PE
+   fails. Therefore, even though the drone sits exactly at the target,
+   the estimates `Θ̂_1, Θ̂_2` can be inaccurate.
 
-   Это нормально: нам не нужна точная идентификация ветра — нам нужна
-   точная компенсация, что согласуется с UUB-результатом.
+   This is fine: we don't need an exact identification of the wind — we
+   need accurate compensation, which is exactly what UUB delivers.
 
-2. **Асимптотическая сходимость к нулю**. С σ-mod гарантирован только UUB
-   с известным радиусом. `e → 0` строго не утверждается.
+2. **Asymptotic convergence to zero**. With σ-mod we only get UUB with a
+   known radius. `e → 0` is not strictly claimed.
 
-3. **Переходные процессы**. Theory не оценивает ни перерегулирование, ни
-   transient amplitude. На практике ранние шаги адаптации могут давать
-   кратковременные всплески.
+3. **Transient behaviour**. The theory says nothing about overshoot or
+   transient amplitude. In practice, the early adaptation steps can
+   produce short spikes.
 
-4. **Робастность к unmodeled dynamics**. Если истинная динамика выходит за
-   рамки `linear-in-Φ`, нет гарантии — но σ-mod даёт *robust adaptive
-   control* в смысле Ioannou & Sun §8: ограниченность сохраняется при
-   ограниченных unmodeled dynamics.
+4. **Robustness to unmodelled dynamics**. If the true dynamics violate
+   linear-in-Φ, there is no guarantee — but σ-mod gives *robust adaptive
+   control* in the sense of Ioannou & Sun §8: boundedness is preserved
+   for bounded unmodelled dynamics.
 
-### Что это значит для отчёта
+### Practical implications for the report
 
-Когда показываете график «оценка ветра vs истинный ветер» — **обязательно
-оговаривайте**, что:
-- кривая `Θ̂(t)ᵀΦ(v(t))` — **не** точная оценка возмущения
-- она достаточна **только** для компенсации в смысле трекинга (через
-  closed-loop)
-- расхождение с истинным `δ_true(t)` ожидаемо без PE
+When showing a "wind estimate vs true wind" plot, **always** state that
+- the curve `Θ̂(t)ᵀ Φ(v(t))` is **not** an accurate estimate of the
+  disturbance,
+- it is sufficient **only** for tracking compensation in the closed loop,
+- divergence from the true `δ_true(t)` is expected without PE.
 
-Это правильное и честное толкование, не баг.
+This is the correct and honest interpretation, not a bug.
 
 ---
 
-## 13. Связь с PID baseline
+## 13. Connection to the PID baseline
 
-Можно ли считать MRAC обобщением PID? Частично:
+Can MRAC be considered a generalisation of PID? Partially:
 
-| Регрессор | Эквивалент классического регулятора |
+| Regressor | Equivalent to a classical controller |
 |---|---|
-| `Φ = [1]` (n_basis=1) | P + adaptive bias compensation ≈ PI с adaptive integral |
-| `Φ = [1, v]` | + adaptive damping (P + adaptive PI с переменным усилением) |
-| `Φ = [1, v, \|v\|·v]` | + adaptive drag model (нелинейная компенсация) |
+| `Φ = [1]` (n_basis=1) | P + adaptive bias compensation ≈ PI with adaptive integral |
+| `Φ = [1, v]` | + adaptive damping (P + adaptive PI with variable gain) |
+| `Φ = [1, v, \|v\|·v]` | + adaptive drag model (nonlinear compensation) |
 
-Преимущество MRAC над PI:
-- закон обновления **выводится из Lyapunov**, не подбирается эмпирически
-- параметр `γ` контролирует скорость адаптации (vs `ki` у PI, который
-  фиксирован и может вызвать integral wind-up)
-- σ-mod даёт принципиальную защиту от drift (vs anti-windup ad-hoc)
+Advantages of MRAC over a fixed PI:
+- the update law is **derived from Lyapunov**, not tuned heuristically;
+- the parameter `γ` controls adaptation speed (vs `ki` of a PI which is
+  fixed and prone to integral wind-up);
+- σ-mod gives a principled defence against drift (vs ad-hoc anti-windup).
 
-Недостаток:
-- больше параметров для подбора (`a_m, γ, σ, θ_max, regressor`)
-- сложнее в верификации (нужен Lyapunov анализ)
+Disadvantages:
+- more parameters to tune (`a_m, γ, σ, θ_max, regressor`);
+- harder to verify (a Lyapunov analysis is required).
 
 ---
 
-## 14. Параметры и их подбор
+## 14. Parameters and how to tune them
 
-### `a_m` — частота эталона
+### `a_m` — reference-model rate
 
-- **Слишком мало** (a_m << dynamic характеристик): эталон медленный, плант его
-  обгоняет, e отрицательная, MRAC начинает «тормозить» дрон → потеря
-  быстродействия.
-- **Слишком много** (a_m → ∞): эталон требует мгновенного отклика, плант не
-  успевает, e большое всё время, адаптация бессмысленно работает.
-- **Sweet spot**: `a_m ≈ ω_inner_loop / 3` — внутренний контур (PID на углах)
-  должен быть быстрее эталона хотя бы в 3 раза. У нас inner ω_n ≈ 30 рад/с,
-  значит `a_m ≤ 10`. Выбрали 6 (xy) и 8 (z).
+- **Too small** (a_m << dynamic characteristics): the reference is slow,
+  the plant overtakes it, e becomes negative, MRAC starts "braking" the
+  drone → loss of bandwidth.
+- **Too large** (a_m → ∞): the reference asks for an instant response, the
+  plant cannot follow, e is permanently large, adaptation works in vain.
+- **Sweet spot**: `a_m ≈ ω_inner_loop / 3` — the inner loop (PID on
+  attitude) must be at least 3× faster than the reference. We have
+  ω_n ≈ 30 rad/s for the inner loop, so `a_m ≤ 10`. We chose 6 (xy) and
+  8 (z).
 
-### `γ` — скорость адаптации
+### `γ` — adaptation rate
 
-- **Слишком мало**: параметры не успевают подстроиться → PID-like поведение.
-- **Слишком много**: high-gain adaptation, transient становится колебательным,
-  чувствительность к шуму растёт.
-- **Sweet spot**: `γ` в порядке `1..10`, в коде `γ = 3`.
+- **Too small**: parameters do not adapt → PID-like behaviour.
+- **Too large**: high-gain adaptation, oscillatory transient, sensitivity
+  to noise.
+- **Sweet spot**: `γ` of order `1..10`; in code `γ = 3`.
 
-Интересное соотношение: эффективная константа времени адаптации ≈ `1/(γ·||Φ||²)`.
-При `||Φ|| ~ 5`, `γ = 3`: τ_adapt ≈ 13 мс — быстрее эталона, что нормально.
+A useful order-of-magnitude relation: the effective adaptation time
+constant is `≈ 1/(γ·||Φ||²)`. With `||Φ|| ~ 5` and `γ = 3`,
+τ_adapt ≈ 13 ms — faster than the reference model, which is normal.
 
 ### `σ` — leakage rate
 
-Маленький, чтобы не сильно ухудшать steady-state, но достаточный для
-устойчивости: типично 0.1..1.0. У нас `σ = 0.5`.
+Small enough not to spoil steady-state, but large enough for stability —
+typically 0.1..1.0. We use `σ = 0.5`.
 
-Эффективный bias параметров в установившемся режиме `~ σ·||Θ*||/(γ·||Φ||²)` —
-в нашем случае ~ 0.05, незаметно.
+The effective steady-state parameter bias is
+`~ σ·||Θ*||/(γ·||Φ||²)` — about 0.05 in our setup, negligible.
 
 ### `θ_max` — projection limit
 
-«Hard fuse». Должен быть на 2..5x больше ожидаемого `||Θ*||`. У нас по
-анализу drag-параметров `||Θ*|| ~ 1`, значит `θ_max = 5..10`. Выбрали 8.
+A "hard fuse". Should be 2..5× the expected `||Θ*||`. From our drag-parameter
+analysis `||Θ*|| ~ 1`, so `θ_max = 5..10`. We chose 8.
 
-### `n_basis` — размерность регрессора
+### `n_basis` — regressor dimension
 
-- 1: только bias — для quasi-стационарного ветра
+- 1: bias only — for quasi-stationary wind
 - 2: + linear damping
-- 3: + quadratic drag — стандарт для дрона. Используем.
+- 3: + quadratic drag — the standard for a drone. We use it.
 
 ---
 
-## 15. Литература
+## 15. References
 
 1. **Lavretsky E., Wise K.** *Robust and Adaptive Control with Aerospace
-   Applications.* Springer, 2013. — основной учебник по MRAC,
-   гл. 9–11 (direct MRAC, σ-mod, projection).
+   Applications.* Springer, 2013. — the principal MRAC textbook,
+   chs. 9–11 (direct MRAC, σ-mod, projection).
 
-2. **Ioannou P., Sun J.** *Robust Adaptive Control.* Prentice-Hall, 1996. —
-   глубокий теоретический трактат, гл. 8 (robust adaptation modifications).
+2. **Ioannou P., Sun J.** *Robust Adaptive Control.* Prentice-Hall, 1996.
+   — deep theoretical treatise, ch. 8 (robust adaptation modifications).
 
 3. **Hovakimyan N., Cao C.** *L1 Adaptive Control Theory.* SIAM, 2010. —
-   modern alternative to MRAC с low-pass фильтром.
+   modern alternative to MRAC with a low-pass filter on the adaptation.
 
-4. **Astrom K., Wittenmark B.** *Adaptive Control.* Addison-Wesley, 1995. —
-   классика, обзор STR / MRAC / GAS.
+4. **Astrom K., Wittenmark B.** *Adaptive Control.* Addison-Wesley, 1995.
+   — a classic survey, STR / MRAC / GAS.
 
 5. **Slotine J.-J., Li W.** *Applied Nonlinear Control.* Prentice-Hall,
-   1991. — гл. 8 про adaptive с понятным изложением Lyapunov-выводов.
+   1991. — ch. 8 on adaptive control with a clear Lyapunov-based
+   exposition.
 
 ---
 
-## TL;DR для защиты
+## TL;DR for the defense
 
-1. Plant: `v̇ = u + Θ*ᵀΦ(v)`, regressor `Φ = [1, v, |v|v]`.
-2. Reference model: `v̇_m = -a_m(v_m - v_des)`, выбирается стабильным.
-3. Control: `u = a_m(v_des - v) - Θ̂ᵀΦ(v)`.
-4. Adaptive law: `Θ̂̇ = γ·e·Φ - σ·Θ̂`, e = v - v_m.
+1. Plant: `v̇ = u + Θ*ᵀ Φ(v)`, regressor `Φ = [1, v, |v|v]`.
+2. Reference model: `v̇_m = -a_m(v_m - v_des)`, chosen stable.
+3. Control: `u = a_m(v_des - v) - Θ̂ᵀ Φ(v)`.
+4. Adaptive law: `Θ̂̇ = γ·e·Φ - σ·Θ̂`, `e = v - v_m`.
 5. Lyapunov: `V = ½e² + 1/(2γ)||Θ̃||²`, `V̇ ≤ -a_m e² + (σ/2γ)||Θ*||²`.
-6. Гарантия: **UUB** (e и Θ̂ ограничены, e → малая окрестность нуля).
-7. Не гарантировано: `Θ̂ → Θ*` — нужен PE, в нашей задаче часто отсутствует.
-8. σ-mod нужна для **robustness** (защита от drift при отсутствии PE).
-9. Saturation freeze + projection — практические штрихи, не нарушают Lyapunov.
+6. Guarantee: **UUB** (e and Θ̂ bounded, e → small neighborhood of zero).
+7. Not guaranteed: `Θ̂ → Θ*` — that requires PE, which is generally absent
+   in our task.
+8. σ-mod is needed for **robustness** (drift protection without PE).
+9. Saturation freeze + projection — practical refinements that do not
+   violate the Lyapunov analysis.
 
-Если придерутся к точности оценки `Θ̂`: «параметры ограничены и достаточны
-для UUB-tracking; сходимость к Θ* требует PE, которого в нашем сценарии нет
-и который **не нужен** для tracking».
+If asked about the precision of `Θ̂`: "the parameters are bounded and
+sufficient for UUB-tracking; convergence to `Θ*` requires PE, which we
+neither have nor need for tracking."
