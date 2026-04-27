@@ -9,6 +9,17 @@
 > target within 25 s (final error 3.18 m), MRAC enters the ε-ball in
 > 14.45 s (final error 0.148 m) — a 95 % improvement.
 
+<p align="center">
+  <img src="dashboard.gif" alt="Interactive Plotly dashboard playback" width="900"/>
+</p>
+
+> Recording of the interactive Plotly dashboard ([dashboard.html](dashboard.html))
+> playing back. Four panels share one slider/play button: rotatable 3D,
+> top-down X-Y, phase portrait $r$ vs $\dot r$, and the
+> **real-time Lyapunov function $V(t)$** (bottom-right). $V(t)$ shows
+> transient peaks during maneuvers but stays inside a bounded region —
+> exactly the UUB behavior predicted by the Lyapunov analysis (see §5).
+
 The goal of the project is to design an **adaptive controller** for a
 quadrotor under non-stationary wind disturbance, achieve robust tracking of
 a setpoint, and **demonstrate the advantage of adaptive control over a
@@ -45,9 +56,7 @@ $$
 x = [\,p^\top,\; v^\top,\; \eta^\top,\; \omega^\top\,]^\top \in \mathbb{R}^{12},
 $$
 
-where $p \in \mathbb{R}^3$ is position in the world frame, $v \in
-\mathbb{R}^3$ is velocity, $\eta = [\phi, \theta, \psi]^\top$ are Euler
-angles (roll, pitch, yaw), and $\omega \in \mathbb{R}^3$ are body rates.
+where $p \in \mathbb{R}^3$ is position in the world frame, $v \in \mathbb{R}^3$ is velocity, $\eta = [\phi, \theta, \psi]^\top$ are Euler angles (roll, pitch, yaw), and $\omega \in \mathbb{R}^3$ are body rates.
 
 Dynamics ([src/system.py](src/system.py)):
 
@@ -99,7 +108,7 @@ where $\phi$ is roll and $\theta$ is pitch.
 - **Drag form** is known (linear + quadratic), the coefficients $c_1, c_2$
   are fixed.
 - **Wind $v_w(t)$** is unknown a priori but bounded:
-  $\lVertv_w(t)\rVert_\infty \le 5$ m/s, with both high-frequency (~3 rad/s) and
+  $\lVert v_w(t)\rVert_\infty \le 5$ m/s, with both high-frequency (~3 rad/s) and
   low-frequency (~0.4 rad/s) components plus a constant bias.
 - **Full state** $x$ is available for measurement (no noise, no delays).
 - **Actuators are saturated**: $u_i \in [0, 5]$ N, tilt
@@ -118,7 +127,7 @@ Idea:
    estimate of the unknown disturbance parameters.
 3. Update law $\dot{\hat\Theta} = \gamma e \Phi - \sigma \hat\Theta$
    with $e = v - v_m$.
-4. The Lyapunov function $V = \tfrac12 e^2 + \tfrac{1}{2\gamma}\lVert\tilde\Theta\rVert^2$
+4. The Lyapunov function $V = \tfrac12 e^2 + \tfrac{1}{2\gamma}\lVert \tilde\Theta\rVert^2$
    guarantees **uniform ultimate boundedness** (UUB).
 
 Alternatives considered and rejected:
@@ -182,10 +191,10 @@ convergence $\hat\Theta \to \Theta^{*}$.
 |---|---|
 | Motor thrust $u_i$ | $0 \le u_i \le 5$ N |
 | Tilt angles $\phi, \theta$ | $\le 15°$ |
-| Desired velocity | $\lVertv_{des,xy}\rVert \le 2.5$ m/s, $\lVertv_{des,z}\rVert \le 2$ m/s |
-| Desired acceleration | $\lVerta_{des,xy}\rVert \le 8$, $\lVerta_{des,z}\rVert \le 10$ m/s² |
+| Desired velocity | $\lVert v_{des,xy}\rVert \le 2.5$ m/s, $\lVert v_{des,z}\rVert \le 2$ m/s |
+| Desired acceleration | $\lVert a_{des,xy}\rVert \le 8$, $\lVert a_{des,z}\rVert \le 10$ m/s² |
 | Thrust $T_d$ | $0.2 \cdot mg \le T \le 3.0 \cdot mg$ |
-| Adaptive parameters | $\lVert\hat\Theta_i\rVert_2 \le 8$ (projection) |
+| Adaptive parameters | $\lVert \hat\Theta_i\rVert_2 \le 8$ (projection) |
 
 When the actuator saturates, **adaptation is frozen** (Lavretsky §10.2) —
 without this, σ-modification alone is insufficient for stability.
@@ -304,7 +313,7 @@ $\dot{\hat\Theta}_i = 0$ (adaptation freeze).
 After each step a projection is applied:
 
 $$
-\hat\Theta_i \leftarrow \hat\Theta_i \cdot \min\left(1,\ \frac{\theta_{\max}}{\lVert\hat\Theta_i\rVert}\right).
+\hat\Theta_i \leftarrow \hat\Theta_i \cdot \min\left(1,\ \frac{\theta_{\max}}{\lVert \hat\Theta_i\rVert}\right).
 $$
 
 ### 4.3 Idea of derivation
@@ -312,18 +321,18 @@ $$
 Lyapunov candidate per axis:
 
 $$
-V_i(e_i, \tilde\Theta_i) = \tfrac12 e_i^2 + \tfrac{1}{2\gamma}\lVert\tilde\Theta_i\rVert^2.
+V_i(e_i, \tilde\Theta_i) = \tfrac12 e_i^2 + \tfrac{1}{2\gamma}\lVert \tilde\Theta_i\rVert^2.
 $$
 
 Differentiating along trajectories, substituting the update law and applying
 Young's inequality:
 
 $$
-\dot V_i \le -a_m\,e_i^2 - \tfrac{\sigma}{2\gamma}\lVert\tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert\Theta_i^{*}\rVert^2.
+\dot V_i \le -a_m\,e_i^2 - \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{*}\rVert^2.
 $$
 
 This yields **UUB**: $(e_i, \tilde\Theta_i)$ remain in a bounded ellipsoid of
-radius $\sim \sigma\lVert\Theta_i^{*}\rVert/\sqrt{a_m\gamma}$. The full derivation is
+radius $\sim \sigma\lVert \Theta_i^{*}\rVert/\sqrt{a_m\gamma}$. The full derivation is
 in [MRAC.md §6–§7](MRAC.md).
 
 ---
@@ -364,10 +373,15 @@ $$
 $$
 
 Using $\hat\Theta_i = \Theta_i^{*} - \tilde\Theta_i$ and Young's inequality
-$\tilde\Theta_i^\top \Theta_i^{*} \le \tfrac12\lVert\tilde\Theta_i\rVert^2 + \tfrac12\lVert\Theta_i^{*}\rVert^2$:
 
 $$
-\boxed{\dot V_i \le -a_m\, e_i^2 - \tfrac{\sigma}{2\gamma}\lVert\tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert\Theta_i^{*}\rVert^2.}
+\tilde\Theta_i^{\top} \Theta_i^{*} \;\le\; \tfrac12\lVert \tilde\Theta_i\rVert^2 + \tfrac12\lVert \Theta_i^{*}\rVert^2,
+$$
+
+we obtain
+
+$$
+\boxed{\dot V_i \le -a_m\, e_i^2 - \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{*}\rVert^2.}
 $$
 
 ### 5.4 Consequences
@@ -375,14 +389,14 @@ $$
 `V̇` is negative outside the ellipsoid
 
 $$
-\mathcal{B}_i = \{ (e_i, \tilde\Theta_i)\ :\ a_m e_i^2 + \tfrac{\sigma}{2\gamma}\lVert\tilde\Theta_i\rVert^2 \le \tfrac{\sigma}{2\gamma}\lVert\Theta_i^{*}\rVert^2 \}.
+\mathcal{B}_i = \{ (e_i, \tilde\Theta_i)\ :\ a_m e_i^2 + \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 \le \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{*}\rVert^2 \}.
 $$
 
 Consequences:
 - $V_i(t)$ is bounded ⇒ both $e_i$ and $\tilde\Theta_i$ are bounded
   **for all** $t$ (UUB).
 - $e_i(t)$ converges to a neighborhood of zero of radius
-  $\sim \sigma\lVert\Theta_i^{*}\rVert/a_m$.
+  $\sim \sigma\lVert \Theta_i^{*}\rVert/a_m$.
 - **Convergence $\hat\Theta_i \to \Theta_i^{*}$ is NOT guaranteed** — it
   requires *persistent excitation*, which is generally absent in a
   setpoint-stabilization task (once near the target, $v \approx 0$ and the
@@ -396,19 +410,30 @@ Consequences:
 > black) is bounded throughout the run; transient peaks coincide with
 > acceleration phases when the tracking error grows. The bottom panel
 > separates the contributions: $\lVert e \rVert$ shrinks while
-> $\lVert\hat\Theta\rVert$ saturates at a finite value — exactly the
-> behaviour predicted by the inequality $\dot V_i \le -a_m e_i^2 +
-> (\sigma/2\gamma)\lVert\Theta_i^{*}\rVert^2$.
+> $\lVert \hat\Theta\rVert$ saturates at a finite value — exactly the
+> behaviour predicted by the inequality $\dot V_i \le -a_m e_i^2 + (\sigma/2\gamma)\lVert \Theta_i^{*}\rVert^2$.
 
 ### 5.5 If the wind is time-varying
 
-The true disturbance is not constant but $\Delta_i(v_i, t) = {\Theta_i^{*}(t)}^\top \Phi(v_i)$
-with slowly varying $\Theta_i^{*}(t)$.
+The true disturbance is not constant — it has the form
 
-Then `V̇` picks up an extra term $-\dot\Theta_i^{*} \tilde\Theta_i / \gamma$,
-and the inequality includes $\sigma/(2\gamma)(\lVert\Theta^{*}\rVert^2 + \lVert\dot\Theta^{*}\rVert^2/\sigma^2)$.
+$$
+\Delta_i(v_i, t) = {\Theta_i^{*}(t)}^\top \Phi(v_i),
+$$
 
-UUB is preserved provided $\lVert\dot\Theta_i^{*}\rVert$ is bounded; the size of the
+with slowly varying $\Theta_i^{*}(t)$. Then $\dot V$ picks up an extra term
+
+$$
+-\dot{\Theta}_i^{*\,\top}\,\tilde{\Theta}_i \,/\, \gamma,
+$$
+
+and the Lyapunov inequality picks up an additive constant
+
+$$
+\tfrac{\sigma}{2\gamma}\bigl(\lVert \Theta^{*}\rVert^2 + \lVert \dot{\Theta}^{*}\rVert^2 / \sigma^2\bigr).
+$$
+
+UUB is preserved provided $\lVert \dot{\Theta}_i^{*}\rVert$ is bounded; the size of the
 ultimate set grows accordingly. This is visible in figures 04 and 05 (see §9).
 
 A detailed analysis with alternatives (e-modification, projection-based
@@ -436,12 +461,10 @@ MRAC) is given in [MRAC.md §7, §12](MRAC.md).
     3. Regressor: $\Phi_i = [1,\ v_i,\ |v_i|\,v_i]^\top$.
     4. Commanded acceleration:
        $a_{cmd,i}^{\text{unsat}} = a_m(v_{des,i} - v_i) - \hat\Theta_i^\top \Phi_i$.
-    5. Saturation: $a_{cmd,i} = \mathrm{clip}(a_{cmd,i}^{\text{unsat}},
-       \pm a_{\max,i})$.
-    6. **If** not saturated: $\hat\Theta_i \leftarrow \hat\Theta_i +
-       \Delta t\,(\gamma e_i \Phi_i - \sigma \hat\Theta_i)$.
-    7. Projection: if $\lVert\hat\Theta_i\rVert > \theta_{\max}$, set
-       $\hat\Theta_i \leftarrow \theta_{\max} \cdot \hat\Theta_i / \lVert\hat\Theta_i\rVert$.
+    5. Saturation: $a_{cmd,i} = \mathrm{clip}(a_{cmd,i}^{\text{unsat}},\, \pm a_{\max,i})$.
+    6. **If** not saturated: $\hat\Theta_i \leftarrow \hat\Theta_i + \Delta t\,(\gamma e_i \Phi_i - \sigma \hat\Theta_i)$.
+    7. Projection: if $\lVert \hat\Theta_i\rVert > \theta_{\max}$, set
+       $\hat\Theta_i \leftarrow \theta_{\max} \cdot \hat\Theta_i / \lVert \hat\Theta_i\rVert$.
 4. Yaw-frame decoupling: $a_x^b = c_\psi a_x + s_\psi a_y$,
    $a_y^b = -s_\psi a_x + c_\psi a_y$.
 5. Tilt commands: $\theta_d = \arctan(a_x^b / (g + a_z))$,
@@ -449,8 +472,7 @@ MRAC) is given in [MRAC.md §7, §12](MRAC.md).
 6. Thrust: $T_d = m(g + a_z) / (\cos\phi_d \cos\theta_d)$, clipped to
    $[0.2\,mg, 3\,mg]$.
 7. Inner PID: $\tau_\phi, \tau_\theta, \tau_\psi$ from the attitude errors.
-8. Mixer: $U = (T_d, \tau_\phi, \tau_\theta, \tau_\psi)
-   \to (u_1, u_2, u_3, u_4)$, lower-clipped at zero.
+8. Mixer: $U = (T_d, \tau_\phi, \tau_\theta, \tau_\psi) \to (u_1, u_2, u_3, u_4)$, lower-clipped at zero.
 9. Apply $u$ to the plant; perform an RK4 step; go to step 1.
 
 ---
@@ -462,10 +484,10 @@ MRAC) is given in [MRAC.md §7, §12](MRAC.md).
 | Parameter | Value |
 |---|---|
 | Initial state | $p_0$ random in cube $[5, 15]^3$, $v_0 = \omega_0 = 0$, $\eta_0 = 0$ |
-| Target | $p_t$ random in cube $[5, 15]^3$, $\lVertp_t - p_0\rVert \ge 6$ m |
+| Target | $p_t$ random in cube $[5, 15]^3$, $\lVert p_t - p_0\rVert \ge 6$ m |
 | Duration | $T_{\max} = 25$ s |
 | RK4 step | $\Delta t = 5$ ms |
-| Stopping condition | $\lVertp - p_t\rVert < 0.15$ m (ε-ball) |
+| Stopping condition | $\lVert p - p_t\rVert < 0.15$ m (ε-ball) |
 | Seed | 42 (for reproducibility) |
 
 ### 7.2 Reference trajectory
@@ -594,7 +616,7 @@ After `python scripts/generate_report.py` the `figures/` folder contains:
 | `01_trajectory_3d.png` | 3D trajectory PID vs MRAC, ε-sphere wireframe |
 | `02_xy_topdown.png` | top-down + cylindrical projection $\sqrt{x^2+y^2}$ vs $z$ |
 | `03_state_signals.png` | pos / vel / euler PID (dashed) vs MRAC (solid) |
-| `04_lyapunov.png` | $V(t) = \tfrac12\lVerte\rVert^2 + \tfrac{1}{2\gamma}\lVert\hat\Theta\rVert^2$ + decomposition |
+| `04_lyapunov.png` | $V(t) = \tfrac12\lVert e\rVert^2 + \tfrac{1}{2\gamma}\lVert \hat\Theta\rVert^2$ + decomposition |
 | `05_error_metrics.png` | $\rho(t)$ in symlog + cumulative IAE |
 | `06_phase_portrait.png` | $r$ vs $\dot r$ (distance to target and approach rate) |
 | `07_wind_estimation.png` | $\hat\Theta^\top \Phi(v)$ vs true drag/m **with explicit caveat** about PE |
@@ -694,22 +716,7 @@ the Lyapunov derivation, the rationale for σ-modification, the discussion
 of PE, the comparison with PID, and the literature. It is meant as a
 "defense-grade" knowledge document one can reference verbatim.
 
-### 9.4 Interactive dashboard preview
-
-<p align="center">
-  <img src="dashboard.gif" alt="Interactive Plotly dashboard playback" width="900"/>
-</p>
-
-> Recording of the interactive dashboard ([dashboard.html](dashboard.html))
-> playing back. Four panels are synchronized by a single play/slider:
-> rotatable 3D, top-down X-Y, phase portrait $r$ vs $\dot r$, and
-> **real-time Lyapunov function $V(t)$** (bottom-right). The blue cursor
-> on the V-panel walks left-to-right as the drone moves; transient peaks
-> appear during maneuvers, then $V$ settles into a bounded region — exactly
-> the UUB behavior predicted by the inequality
-> $\dot V \le -a_m e^2 + (\sigma/2\gamma)\lVert\Theta^{*}\rVert^2$.
-
-### 9.5 Figure gallery
+### 9.4 Figure gallery
 
 Other diagnostic plots produced by `scripts/generate_report.py`:
 
