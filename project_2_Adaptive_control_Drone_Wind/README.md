@@ -174,16 +174,16 @@ yaw torque commands.
 The disturbance on each velocity axis is parameterized via a regressor:
 
 $$
-\Delta_i(v_i) = {\Theta_i^{*}}^\top \Phi(v_i),\qquad i \in \{x, y, z\},
+\Delta_i(v_i) = {\Theta_i^{\ast}}^\top \Phi(v_i),\qquad i \in \{x, y, z\},
 $$
 
 where $\Phi(v) = [1,\, v,\, |v|\cdot v]^\top \in \mathbb{R}^3$ is the known
-regressor (bias + linear drag + quadratic drag), and $\Theta_i^{*} \in \mathbb{R}^3$ is the **unknown** true parameter for axis $i$.
+regressor (bias + linear drag + quadratic drag), and $\Theta_i^{\ast} \in \mathbb{R}^3$ is the **unknown** true parameter for axis $i$.
 
 In reality $\Delta_i$ also depends on $v_w(t)$ and is not exactly linear in
 $\Phi(v)$ — this assumption is violated (see §11 in [MRAC.md](MRAC.md)).
 σ-modification compensates by yielding UUB instead of asymptotic
-convergence $\hat\Theta \to \Theta^{*}$.
+convergence $\hat\Theta \to \Theta^{\ast}$.
 
 ### 2.4 Control bounds
 
@@ -204,7 +204,7 @@ without this, σ-modification alone is insufficient for stability.
 The closed-loop system per axis (simplified for one velocity axis):
 
 $$
-\dot v_i = u_i + \Theta_i^{*\top}\Phi(v_i),
+\dot v_i = u_i + \Theta_i^{\ast\top}\Phi(v_i),
 $$
 
 where $u_i$ is the commanded acceleration from MRAC and $\Phi$ the
@@ -234,11 +234,11 @@ Substituting the control law $u_i = a_m(v_{des,i} - v_i) - \hat\Theta_i^\top \Ph
 into the plant:
 
 $$
-\dot v_i = a_m(v_{des,i} - v_i) - \hat\Theta_i^\top\Phi + \Theta_i^{*\top}\Phi
+\dot v_i = a_m(v_{des,i} - v_i) - \hat\Theta_i^\top\Phi + \Theta_i^{\ast\top}\Phi
         = -a_m(v_i - v_{des,i}) + \tilde\Theta_i^\top \Phi,
 $$
 
-where $\tilde\Theta_i = \Theta_i^{*} - \hat\Theta_i$ is the parameter error.
+where $\tilde\Theta_i = \Theta_i^{\ast} - \hat\Theta_i$ is the parameter error.
 
 Subtracting $\dot v_{m,i}$:
 
@@ -328,11 +328,11 @@ Differentiating along trajectories, substituting the update law and applying
 Young's inequality:
 
 $$
-\dot V_i \le -a_m\,e_i^2 - \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{*}\rVert^2.
+\dot V_i \le -a_m\,e_i^2 - \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{\ast}\rVert^2.
 $$
 
 This yields **UUB**: $(e_i, \tilde\Theta_i)$ remain in a bounded ellipsoid of
-radius $\sim \sigma\lVert \Theta_i^{*}\rVert/\sqrt{a_m\gamma}$. The full derivation is
+radius $\sim \sigma\lVert \Theta_i^{\ast}\rVert/\sqrt{a_m\gamma}$. The full derivation is
 in [MRAC.md §6–§7](MRAC.md).
 
 ---
@@ -349,7 +349,7 @@ $$
 $$
 
 where $\dot{\tilde\Theta}_i$ is the parameter-error derivative (since
-$\Theta_i^{*}$ is constant).
+$\Theta_i^{\ast}$ is constant).
 
 ### 5.2 Lyapunov function
 
@@ -372,16 +372,16 @@ $$
 \dot V_i = -a_m e_i^2 + (\sigma/\gamma)\,\tilde\Theta_i^\top \hat\Theta_i.
 $$
 
-Using $\hat\Theta_i = \Theta_i^{*} - \tilde\Theta_i$ and Young's inequality
+Using $\hat\Theta_i = \Theta_i^{\ast} - \tilde\Theta_i$ and Young's inequality
 
 $$
-\tilde\Theta_i^{\top} \Theta_i^{*} \;\le\; \tfrac12\lVert \tilde\Theta_i\rVert^2 + \tfrac12\lVert \Theta_i^{*}\rVert^2,
+\tilde\Theta_i^{\top} \Theta_i^{\ast} \;\le\; \tfrac12\lVert \tilde\Theta_i\rVert^2 + \tfrac12\lVert \Theta_i^{\ast}\rVert^2,
 $$
 
 we obtain
 
 $$
-\boxed{\dot V_i \le -a_m\, e_i^2 - \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{*}\rVert^2.}
+\boxed{\dot V_i \le -a_m\, e_i^2 - \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{\ast}\rVert^2.}
 $$
 
 ### 5.4 Consequences
@@ -389,15 +389,15 @@ $$
 `V̇` is negative outside the ellipsoid
 
 $$
-\mathcal{B}_i = \{ (e_i, \tilde\Theta_i)\ :\ a_m e_i^2 + \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 \le \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{*}\rVert^2 \}.
+\mathcal{B}_i = \{ (e_i, \tilde\Theta_i)\ :\ a_m e_i^2 + \tfrac{\sigma}{2\gamma}\lVert \tilde\Theta_i\rVert^2 \le \tfrac{\sigma}{2\gamma}\lVert \Theta_i^{\ast}\rVert^2 \}.
 $$
 
 Consequences:
 - $V_i(t)$ is bounded ⇒ both $e_i$ and $\tilde\Theta_i$ are bounded
   **for all** $t$ (UUB).
 - $e_i(t)$ converges to a neighborhood of zero of radius
-  $\sim \sigma\lVert \Theta_i^{*}\rVert/a_m$.
-- **Convergence $\hat\Theta_i \to \Theta_i^{*}$ is NOT guaranteed** — it
+  $\sim \sigma\lVert \Theta_i^{\ast}\rVert/a_m$.
+- **Convergence $\hat\Theta_i \to \Theta_i^{\ast}$ is NOT guaranteed** — it
   requires *persistent excitation*, which is generally absent in a
   setpoint-stabilization task (once near the target, $v \approx 0$ and the
   regressor degenerates).
@@ -411,29 +411,29 @@ Consequences:
 > acceleration phases when the tracking error grows. The bottom panel
 > separates the contributions: $\lVert e \rVert$ shrinks while
 > $\lVert \hat\Theta\rVert$ saturates at a finite value — exactly the
-> behaviour predicted by the inequality $\dot V_i \le -a_m e_i^2 + (\sigma/2\gamma)\lVert \Theta_i^{*}\rVert^2$.
+> behaviour predicted by the inequality $\dot V_i \le -a_m e_i^2 + (\sigma/2\gamma)\lVert \Theta_i^{\ast}\rVert^2$.
 
 ### 5.5 If the wind is time-varying
 
 The true disturbance is not constant — it has the form
 
 $$
-\Delta_i(v_i, t) = {\Theta_i^{*}(t)}^\top \Phi(v_i),
+\Delta_i(v_i, t) = {\Theta_i^{\ast}(t)}^\top \Phi(v_i),
 $$
 
-with slowly varying $\Theta_i^{*}(t)$. Then $\dot V$ picks up an extra term
+with slowly varying $\Theta_i^{\ast}(t)$. Then $\dot V$ picks up an extra term
 
 $$
--\dot{\Theta}_i^{*\,\top}\,\tilde{\Theta}_i \,/\, \gamma,
+-\dot{\Theta}_i^{\ast\,\top}\,\tilde{\Theta}_i \,/\, \gamma,
 $$
 
 and the Lyapunov inequality picks up an additive constant
 
 $$
-\tfrac{\sigma}{2\gamma}\bigl(\lVert \Theta^{*}\rVert^2 + \lVert \dot{\Theta}^{*}\rVert^2 / \sigma^2\bigr).
+\tfrac{\sigma}{2\gamma}\bigl(\lVert \Theta^{\ast}\rVert^2 + \lVert \dot{\Theta}^{\ast}\rVert^2 / \sigma^2\bigr).
 $$
 
-UUB is preserved provided $\lVert \dot{\Theta}_i^{*}\rVert$ is bounded; the size of the
+UUB is preserved provided $\lVert \dot{\Theta}_i^{\ast}\rVert$ is bounded; the size of the
 ultimate set grows accordingly. This is visible in figures 04 and 05 (see §9).
 
 A detailed analysis with alternatives (e-modification, projection-based
