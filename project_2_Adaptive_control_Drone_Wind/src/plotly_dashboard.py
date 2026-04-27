@@ -35,8 +35,19 @@ def _r_and_rdot(states, target):
     return r, r_dot
 
 
+def _compute_lyapunov(history, gamma):
+    """V(t) = 1/2 ||e||^2 + 1/(2*gamma) ||Theta_hat||^2 (sum over axes)."""
+    t = np.asarray(history["t"])
+    e = np.asarray(history["v"]) - np.asarray(history["v_m"])      # (T, 3)
+    theta = np.asarray(history["theta"])                            # (T, 3, n_basis)
+    V_e = 0.5 * np.sum(e ** 2, axis=1)
+    V_theta = (0.5 / gamma) * np.sum(theta ** 2, axis=(1, 2))
+    return t, V_e + V_theta, V_e, V_theta
+
+
 def build_dashboard(data_pid, data_mrac, target,
                     label_pid="PID baseline", label_mrac="MRAC",
+                    mrac_history=None, gamma=3.0,
                     target_fps=10, save_path="dashboard.html",
                     title="Drone with wind: PID vs MRAC"):
     """
@@ -78,16 +89,36 @@ def build_dashboard(data_pid, data_mrac, target,
     r_pid,  rdot_pid  = _r_and_rdot(pid_s,  target)
     r_mrac, rdot_mrac = _r_and_rdot(mrac_s, target)
 
+    # ---- Lyapunov pre-computation ------------------------------------------
+    has_lyap = mrac_history is not None
+    if has_lyap:
+        V_t, V_total, V_e, V_theta = _compute_lyapunov(mrac_history, gamma)
+
     # ---- subplot grid -------------------------------------------------------
+    n_rows = 3 if has_lyap else 2
+    if has_lyap:
+        specs = [[{"type": "scatter3d", "rowspan": 3}, {"type": "xy"}],
+                 [None,                                 {"type": "xy"}],
+                 [None,                                 {"type": "xy"}]]
+        row_heights = [0.34, 0.33, 0.33]
+        subplot_titles = ("3D trajectory  (drag to rotate)",
+                          "Top-down  X vs Y",
+                          "Phase portrait  r vs dr/dt",
+                          "Lyapunov  V(t) = ½‖e‖² + 1/(2γ)‖Θ̂‖²")
+    else:
+        specs = [[{"type": "scatter3d", "rowspan": 2}, {"type": "xy"}],
+                 [None,                                 {"type": "xy"}]]
+        row_heights = [0.5, 0.5]
+        subplot_titles = ("3D trajectory  (drag to rotate)",
+                          "Top-down  X vs Y",
+                          "Phase portrait  r vs dr/dt")
+
     fig = make_subplots(
-        rows=2, cols=2,
-        specs=[[{"type": "scatter3d", "rowspan": 2}, {"type": "xy"}],
-               [None,                                 {"type": "xy"}]],
+        rows=n_rows, cols=2,
+        specs=specs,
         column_widths=[0.55, 0.45],
-        row_heights=[0.5, 0.5],
-        subplot_titles=("3D trajectory  (drag to rotate)",
-                        "Top-down  X vs Y",
-                        "Phase portrait  r vs dr/dt"),
+        row_heights=row_heights,
+        subplot_titles=subplot_titles,
         horizontal_spacing=0.06,
         vertical_spacing=0.10,
     )
@@ -169,11 +200,30 @@ def build_dashboard(data_pid, data_mrac, target,
         showlegend=False, name=f"{label_mrac} phase",
     ), row=2, col=2)
 
+    # Lyapunov V(t) static curve + decomposition
+    if has_lyap:
+        fig.add_trace(go.Scatter(
+            x=V_t, y=V_total,
+            mode="lines", line=dict(color=BLUE, width=3),
+            showlegend=False, name="V(t)",
+        ), row=3, col=2)
+        # decomposition (semi-transparent)
+        fig.add_trace(go.Scatter(
+            x=V_t, y=V_e,
+            mode="lines", line=dict(color="rgba(211,47,47,0.7)", width=1.4, dash="dot"),
+            showlegend=False, name="V_e",
+        ), row=3, col=2)
+        fig.add_trace(go.Scatter(
+            x=V_t, y=V_theta,
+            mode="lines", line=dict(color="rgba(46,125,50,0.7)", width=1.4, dash="dash"),
+            showlegend=False, name="V_theta",
+        ), row=3, col=2)
+
     # ===================== ANIMATED LAYER (cursors only) =====================
 
-    # The next 6 traces are updated per-frame.
-    # Order: 3D-pid-now, 3D-mrac-now, XY-pid-now, XY-mrac-now, phase-pid-now, phase-mrac-now
-    cursor_indices = list(range(len(fig.data), len(fig.data) + 6))
+    # The next 6 (or 7) traces are updated per-frame.
+    n_cursors = 7 if has_lyap else 6
+    cursor_indices = list(range(len(fig.data), len(fig.data) + n_cursors))
 
     fig.add_trace(go.Scatter3d(
         x=[p_pid[0, 0]], y=[p_pid[0, 1]], z=[p_pid[0, 2]],
@@ -208,9 +258,23 @@ def build_dashboard(data_pid, data_mrac, target,
         showlegend=False, name="mrac_now_phase",
     ), row=2, col=2)
 
+    if has_lyap:
+        fig.add_trace(go.Scatter(
+            x=[V_t[0]], y=[V_total[0]],
+            mode="markers", marker=dict(size=11, color=BLUE,
+                                        line=dict(color="black", width=1)),
+            showlegend=False, name="V_now",
+        ), row=3, col=2)
+
     # ---- frames -------------------------------------------------------------
     frames = []
     for k in idx:
+        # find the matching MRAC-history index for the V(t) cursor
+        if has_lyap:
+            # history time is monotonic and roughly aligned with sim time
+            j = int(np.searchsorted(V_t, pid_t[k], side="left"))
+            j = min(max(j, 0), len(V_t) - 1)
+
         f_data = [
             go.Scatter3d(x=[p_pid[k, 0]],  y=[p_pid[k, 1]],  z=[p_pid[k, 2]]),
             go.Scatter3d(x=[p_mrac[k, 0]], y=[p_mrac[k, 1]], z=[p_mrac[k, 2]]),
@@ -219,6 +283,9 @@ def build_dashboard(data_pid, data_mrac, target,
             go.Scatter(x=[r_pid[k]],  y=[rdot_pid[k]]),
             go.Scatter(x=[r_mrac[k]], y=[rdot_mrac[k]]),
         ]
+        if has_lyap:
+            f_data.append(go.Scatter(x=[V_t[j]], y=[V_total[j]]))
+
         frames.append(go.Frame(data=f_data, name=f"{pid_t[k]:.2f}",
                                traces=cursor_indices))
 
@@ -241,6 +308,11 @@ def build_dashboard(data_pid, data_mrac, target,
     fig.update_xaxes(title="r = ||p - p_t|| [m]", row=2, col=2, range=[0, rmax])
     fig.update_yaxes(title="dr/dt [m/s]", row=2, col=2,
                      range=[rdot_min - 0.5, rdot_max + 0.5])
+
+    if has_lyap:
+        fig.update_xaxes(title="t [s]", row=3, col=2, range=[0, float(V_t[-1])])
+        fig.update_yaxes(title="V(t)", row=3, col=2,
+                         range=[0, float(V_total.max()) * 1.1])
 
     # ---- play / slider ------------------------------------------------------
     fig.update_layout(
@@ -275,7 +347,7 @@ def build_dashboard(data_pid, data_mrac, target,
         )],
         legend=dict(x=0.0, y=1.0, bgcolor="rgba(255,255,255,0.7)"),
         margin=dict(l=10, r=10, t=80, b=80),
-        height=820,
+        height=950 if has_lyap else 820,
     )
 
     fig.write_html(save_path, include_plotlyjs="cdn", auto_play=False)

@@ -22,13 +22,17 @@ parameter projection. Full mathematical derivation is in [MRAC.md](MRAC.md).
 
 ## 1. Problem Definition
 
+<p align="center">
+  <img src="figures/01_trajectory_3d.png" alt="3D trajectory: PID vs MRAC" width="600"/>
+</p>
+
 ### 1.1 Control objective
 
 Stabilize the drone in a neighborhood of a 3-D setpoint $p_t$ in the
 presence of an unknown wind $v_w(t)$, with the requirements:
 
 - Boundedness of all closed-loop signals (Lyapunov stability).
-- Convergence into the ε-ball: $\| p(t) - p_t \| < \varepsilon$ in finite
+- Convergence into the ε-ball: $\lVert p(t) - p_t \rVert < \varepsilon$ in finite
   time.
 - Outperforming the PID baseline on **final error**, **IAE**, and
   **time-to-target** metrics.
@@ -59,8 +63,7 @@ $$
 
 where $m = 0.5$ kg is the drone mass, $R(\eta)$ is the body-to-world
 rotation matrix, $T_{\text{body}} = [0, 0, \sum_{i} u_i]^\top$ is the total
-thrust expressed in the body frame, $F_{\text{drag}} = -c_1(v - v_w) -
-c_2 \|v - v_w\|(v - v_w)$ is the aerodynamic drag (linear plus quadratic),
+thrust expressed in the body frame, $F_{\text{drag}} = -c_1(v - v_w) - c_2 \lVert v - v_w \rVert (v - v_w)$ is the aerodynamic drag (linear plus quadratic),
 and $g = [0, 0, -9.81]^\top$ is gravity.
 
 $$
@@ -96,7 +99,7 @@ where $\phi$ is roll and $\theta$ is pitch.
 - **Drag form** is known (linear + quadratic), the coefficients $c_1, c_2$
   are fixed.
 - **Wind $v_w(t)$** is unknown a priori but bounded:
-  $\|v_w(t)\|_\infty \le 5$ m/s, with both high-frequency (~3 rad/s) and
+  $\lVertv_w(t)\rVert_\infty \le 5$ m/s, with both high-frequency (~3 rad/s) and
   low-frequency (~0.4 rad/s) components plus a constant bias.
 - **Full state** $x$ is available for measurement (no noise, no delays).
 - **Actuators are saturated**: $u_i \in [0, 5]$ N, tilt
@@ -115,7 +118,7 @@ Idea:
    estimate of the unknown disturbance parameters.
 3. Update law $\dot{\hat\Theta} = \gamma e \Phi - \sigma \hat\Theta$
    with $e = v - v_m$.
-4. The Lyapunov function $V = \tfrac12 e^2 + \tfrac{1}{2\gamma}\|\tilde\Theta\|^2$
+4. The Lyapunov function $V = \tfrac12 e^2 + \tfrac{1}{2\gamma}\lVert\tilde\Theta\rVert^2$
    guarantees **uniform ultimate boundedness** (UUB).
 
 Alternatives considered and rejected:
@@ -162,17 +165,16 @@ yaw torque commands.
 The disturbance on each velocity axis is parameterized via a regressor:
 
 $$
-\Delta_i(v_i) = {\Theta_i^*}^\top \Phi(v_i),\qquad i \in \{x, y, z\},
+\Delta_i(v_i) = {\Theta_i^{*}}^\top \Phi(v_i),\qquad i \in \{x, y, z\},
 $$
 
 where $\Phi(v) = [1,\, v,\, |v|\cdot v]^\top \in \mathbb{R}^3$ is the known
-regressor (bias + linear drag + quadratic drag), and $\Theta_i^* \in
-\mathbb{R}^3$ is the **unknown** true parameter for axis $i$.
+regressor (bias + linear drag + quadratic drag), and $\Theta_i^{*} \in \mathbb{R}^3$ is the **unknown** true parameter for axis $i$.
 
 In reality $\Delta_i$ also depends on $v_w(t)$ and is not exactly linear in
 $\Phi(v)$ — this assumption is violated (see §11 in [MRAC.md](MRAC.md)).
 σ-modification compensates by yielding UUB instead of asymptotic
-convergence $\hat\Theta \to \Theta^*$.
+convergence $\hat\Theta \to \Theta^{*}$.
 
 ### 2.4 Control bounds
 
@@ -180,10 +182,10 @@ convergence $\hat\Theta \to \Theta^*$.
 |---|---|
 | Motor thrust $u_i$ | $0 \le u_i \le 5$ N |
 | Tilt angles $\phi, \theta$ | $\le 15°$ |
-| Desired velocity | $\|v_{des,xy}\| \le 2.5$ m/s, $\|v_{des,z}\| \le 2$ m/s |
-| Desired acceleration | $\|a_{des,xy}\| \le 8$, $\|a_{des,z}\| \le 10$ m/s² |
+| Desired velocity | $\lVertv_{des,xy}\rVert \le 2.5$ m/s, $\lVertv_{des,z}\rVert \le 2$ m/s |
+| Desired acceleration | $\lVerta_{des,xy}\rVert \le 8$, $\lVerta_{des,z}\rVert \le 10$ m/s² |
 | Thrust $T_d$ | $0.2 \cdot mg \le T \le 3.0 \cdot mg$ |
-| Adaptive parameters | $\|\hat\Theta_i\|_2 \le 8$ (projection) |
+| Adaptive parameters | $\lVert\hat\Theta_i\rVert_2 \le 8$ (projection) |
 
 When the actuator saturates, **adaptation is frozen** (Lavretsky §10.2) —
 without this, σ-modification alone is insufficient for stability.
@@ -227,7 +229,7 @@ $$
         = -a_m(v_i - v_{des,i}) + \tilde\Theta_i^\top \Phi,
 $$
 
-where $\tilde\Theta_i = \Theta_i^* - \hat\Theta_i$ is the parameter error.
+where $\tilde\Theta_i = \Theta_i^{*} - \hat\Theta_i$ is the parameter error.
 
 Subtracting $\dot v_{m,i}$:
 
@@ -302,7 +304,7 @@ $\dot{\hat\Theta}_i = 0$ (adaptation freeze).
 After each step a projection is applied:
 
 $$
-\hat\Theta_i \leftarrow \hat\Theta_i \cdot \min\left(1,\ \frac{\theta_{\max}}{\|\hat\Theta_i\|}\right).
+\hat\Theta_i \leftarrow \hat\Theta_i \cdot \min\left(1,\ \frac{\theta_{\max}}{\lVert\hat\Theta_i\rVert}\right).
 $$
 
 ### 4.3 Idea of derivation
@@ -310,18 +312,18 @@ $$
 Lyapunov candidate per axis:
 
 $$
-V_i(e_i, \tilde\Theta_i) = \tfrac12 e_i^2 + \tfrac{1}{2\gamma}\|\tilde\Theta_i\|^2.
+V_i(e_i, \tilde\Theta_i) = \tfrac12 e_i^2 + \tfrac{1}{2\gamma}\lVert\tilde\Theta_i\rVert^2.
 $$
 
 Differentiating along trajectories, substituting the update law and applying
 Young's inequality:
 
 $$
-\dot V_i \le -a_m\,e_i^2 - \tfrac{\sigma}{2\gamma}\|\tilde\Theta_i\|^2 + \tfrac{\sigma}{2\gamma}\|\Theta_i^*\|^2.
+\dot V_i \le -a_m\,e_i^2 - \tfrac{\sigma}{2\gamma}\lVert\tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert\Theta_i^{*}\rVert^2.
 $$
 
 This yields **UUB**: $(e_i, \tilde\Theta_i)$ remain in a bounded ellipsoid of
-radius $\sim \sigma\|\Theta_i^*\|/\sqrt{a_m\gamma}$. The full derivation is
+radius $\sim \sigma\lVert\Theta_i^{*}\rVert/\sqrt{a_m\gamma}$. The full derivation is
 in [MRAC.md §6–§7](MRAC.md).
 
 ---
@@ -338,7 +340,7 @@ $$
 $$
 
 where $\dot{\tilde\Theta}_i$ is the parameter-error derivative (since
-$\Theta_i^*$ is constant).
+$\Theta_i^{*}$ is constant).
 
 ### 5.2 Lyapunov function
 
@@ -361,11 +363,11 @@ $$
 \dot V_i = -a_m e_i^2 + (\sigma/\gamma)\,\tilde\Theta_i^\top \hat\Theta_i.
 $$
 
-Using $\hat\Theta_i = \Theta_i^* - \tilde\Theta_i$ and Young's inequality
-$\tilde\Theta_i^\top \Theta_i^* \le \tfrac12\|\tilde\Theta_i\|^2 + \tfrac12\|\Theta_i^*\|^2$:
+Using $\hat\Theta_i = \Theta_i^{*} - \tilde\Theta_i$ and Young's inequality
+$\tilde\Theta_i^\top \Theta_i^{*} \le \tfrac12\lVert\tilde\Theta_i\rVert^2 + \tfrac12\lVert\Theta_i^{*}\rVert^2$:
 
 $$
-\boxed{\dot V_i \le -a_m\, e_i^2 - \tfrac{\sigma}{2\gamma}\|\tilde\Theta_i\|^2 + \tfrac{\sigma}{2\gamma}\|\Theta_i^*\|^2.}
+\boxed{\dot V_i \le -a_m\, e_i^2 - \tfrac{\sigma}{2\gamma}\lVert\tilde\Theta_i\rVert^2 + \tfrac{\sigma}{2\gamma}\lVert\Theta_i^{*}\rVert^2.}
 $$
 
 ### 5.4 Consequences
@@ -373,28 +375,40 @@ $$
 `V̇` is negative outside the ellipsoid
 
 $$
-\mathcal{B}_i = \left\{ (e_i, \tilde\Theta_i)\ :\ a_m e_i^2 + \tfrac{\sigma}{2\gamma}\|\tilde\Theta_i\|^2 \le \tfrac{\sigma}{2\gamma}\|\Theta_i^*\|^2 \right\}.
+\mathcal{B}_i = \{ (e_i, \tilde\Theta_i)\ :\ a_m e_i^2 + \tfrac{\sigma}{2\gamma}\lVert\tilde\Theta_i\rVert^2 \le \tfrac{\sigma}{2\gamma}\lVert\Theta_i^{*}\rVert^2 \}.
 $$
 
 Consequences:
 - $V_i(t)$ is bounded ⇒ both $e_i$ and $\tilde\Theta_i$ are bounded
   **for all** $t$ (UUB).
 - $e_i(t)$ converges to a neighborhood of zero of radius
-  $\sim \sigma\|\Theta_i^*\|/a_m$.
-- **Convergence $\hat\Theta_i \to \Theta_i^*$ is NOT guaranteed** — it
+  $\sim \sigma\lVert\Theta_i^{*}\rVert/a_m$.
+- **Convergence $\hat\Theta_i \to \Theta_i^{*}$ is NOT guaranteed** — it
   requires *persistent excitation*, which is generally absent in a
   setpoint-stabilization task (once near the target, $v \approx 0$ and the
   regressor degenerates).
 
+<p align="center">
+  <img src="figures/04_lyapunov.png" alt="Lyapunov function V(t) and decomposition" width="780"/>
+</p>
+
+> **Visual confirmation of UUB.** The total Lyapunov function (top panel,
+> black) is bounded throughout the run; transient peaks coincide with
+> acceleration phases when the tracking error grows. The bottom panel
+> separates the contributions: $\lVert e \rVert$ shrinks while
+> $\lVert\hat\Theta\rVert$ saturates at a finite value — exactly the
+> behaviour predicted by the inequality $\dot V_i \le -a_m e_i^2 +
+> (\sigma/2\gamma)\lVert\Theta_i^{*}\rVert^2$.
+
 ### 5.5 If the wind is time-varying
 
-The true disturbance is not constant but $\Delta_i(v_i, t) = {\Theta_i^*(t)}^\top \Phi(v_i)$
-with slowly varying $\Theta_i^*(t)$.
+The true disturbance is not constant but $\Delta_i(v_i, t) = {\Theta_i^{*}(t)}^\top \Phi(v_i)$
+with slowly varying $\Theta_i^{*}(t)$.
 
-Then `V̇` picks up an extra term $-\dot\Theta_i^* \tilde\Theta_i / \gamma$,
-and the inequality includes $\sigma/(2\gamma)(\|\Theta^*\|^2 + \|\dot\Theta^*\|^2/\sigma^2)$.
+Then `V̇` picks up an extra term $-\dot\Theta_i^{*} \tilde\Theta_i / \gamma$,
+and the inequality includes $\sigma/(2\gamma)(\lVert\Theta^{*}\rVert^2 + \lVert\dot\Theta^{*}\rVert^2/\sigma^2)$.
 
-UUB is preserved provided $\|\dot\Theta_i^*\|$ is bounded; the size of the
+UUB is preserved provided $\lVert\dot\Theta_i^{*}\rVert$ is bounded; the size of the
 ultimate set grows accordingly. This is visible in figures 04 and 05 (see §9).
 
 A detailed analysis with alternatives (e-modification, projection-based
@@ -426,8 +440,8 @@ MRAC) is given in [MRAC.md §7, §12](MRAC.md).
        \pm a_{\max,i})$.
     6. **If** not saturated: $\hat\Theta_i \leftarrow \hat\Theta_i +
        \Delta t\,(\gamma e_i \Phi_i - \sigma \hat\Theta_i)$.
-    7. Projection: if $\|\hat\Theta_i\| > \theta_{\max}$, set
-       $\hat\Theta_i \leftarrow \theta_{\max} \cdot \hat\Theta_i / \|\hat\Theta_i\|$.
+    7. Projection: if $\lVert\hat\Theta_i\rVert > \theta_{\max}$, set
+       $\hat\Theta_i \leftarrow \theta_{\max} \cdot \hat\Theta_i / \lVert\hat\Theta_i\rVert$.
 4. Yaw-frame decoupling: $a_x^b = c_\psi a_x + s_\psi a_y$,
    $a_y^b = -s_\psi a_x + c_\psi a_y$.
 5. Tilt commands: $\theta_d = \arctan(a_x^b / (g + a_z))$,
@@ -448,10 +462,10 @@ MRAC) is given in [MRAC.md §7, §12](MRAC.md).
 | Parameter | Value |
 |---|---|
 | Initial state | $p_0$ random in cube $[5, 15]^3$, $v_0 = \omega_0 = 0$, $\eta_0 = 0$ |
-| Target | $p_t$ random in cube $[5, 15]^3$, $\|p_t - p_0\| \ge 6$ m |
+| Target | $p_t$ random in cube $[5, 15]^3$, $\lVertp_t - p_0\rVert \ge 6$ m |
 | Duration | $T_{\max} = 25$ s |
 | RK4 step | $\Delta t = 5$ ms |
-| Stopping condition | $\|p - p_t\| < 0.15$ m (ε-ball) |
+| Stopping condition | $\lVertp - p_t\rVert < 0.15$ m (ε-ball) |
 | Seed | 42 (for reproducibility) |
 
 ### 7.2 Reference trajectory
@@ -509,6 +523,16 @@ condition.
 | Time-to-target | 25.00 s (timeout) | **14.45 s** | **−42 %** |
 | Mean final error (8 seeds, ε=0.15) | 3.19 m | 1.35 m | +58 % |
 | PID timeouts (8 seeds) | **7/8** | **2/8** | — |
+
+<p align="center">
+  <img src="figures/05_error_metrics.png" alt="Tracking error rho(t) and cumulative IAE: PID vs MRAC" width="780"/>
+</p>
+
+> The PID baseline (grey) hovers at 1–3 m above the ε-line for the entire
+> 25-second run, never committing to the target. MRAC (blue) drops below
+> the ε-threshold around 14.5 s and stops the simulation. The cumulative
+> IAE in the bottom panel shows the divergence growing without bound for
+> PID while MRAC's IAE saturates after target acquisition.
 
 ---
 
@@ -570,7 +594,7 @@ After `python scripts/generate_report.py` the `figures/` folder contains:
 | `01_trajectory_3d.png` | 3D trajectory PID vs MRAC, ε-sphere wireframe |
 | `02_xy_topdown.png` | top-down + cylindrical projection $\sqrt{x^2+y^2}$ vs $z$ |
 | `03_state_signals.png` | pos / vel / euler PID (dashed) vs MRAC (solid) |
-| `04_lyapunov.png` | $V(t) = \tfrac12\|e\|^2 + \tfrac{1}{2\gamma}\|\hat\Theta\|^2$ + decomposition |
+| `04_lyapunov.png` | $V(t) = \tfrac12\lVerte\rVert^2 + \tfrac{1}{2\gamma}\lVert\hat\Theta\rVert^2$ + decomposition |
 | `05_error_metrics.png` | $\rho(t)$ in symlog + cumulative IAE |
 | `06_phase_portrait.png` | $r$ vs $\dot r$ (distance to target and approach rate) |
 | `07_wind_estimation.png` | $\hat\Theta^\top \Phi(v)$ vs true drag/m **with explicit caveat** about PE |
@@ -604,12 +628,47 @@ After `python scripts/generate_report.py` the `figures/` folder contains:
   while PID hovers at 1–3 m — see
   [`figures/05_error_metrics.png`](figures/05_error_metrics.png).
 
+<p align="center">
+  <img src="figures/08_adaptation.png" alt="MRAC adaptation: per-axis reference-model tracking and parameter evolution" width="820"/>
+</p>
+
+> **Per-axis MRAC adaptation.** Top row: plant velocity (red) tracking the
+> reference-model output (dashed blue) under the velocity setpoint (dotted
+> black). Bottom row: the three adaptive parameters
+> $\hat\Theta_0,\hat\Theta_1,\hat\Theta_2$ for each axis. They settle into
+> bounded values once the transient is over — the σ-leak prevents drift,
+> the projection bound is never engaged.
+
+<p align="center">
+  <img src="figures/06_phase_portrait.png" alt="Phase portrait r vs r-dot" width="640"/>
+</p>
+
+> **Phase portrait $r$ vs $\dot r$.** Both controllers start with large
+> $r$ and approach the origin from the bottom-half plane (negative $\dot r$
+> = approaching). MRAC commits to the target — its trajectory ends at an
+> X-marker close to $r = 0$. PID orbits without committing, ending far
+> from $r = 0$ with $\dot r$ still oscillating around zero.
+
 ### 9.2 What remains limited
 
 - **`Θ̂ → Θ*` is NOT guaranteed** by the theory without persistent
   excitation. In practice, once the target is reached $v \approx 0$ and the
   regressor $\Phi(v)$ degenerates, so the estimate stops being refined.
   Figures 04 and 07 carry explicit caveat captions.
+
+<p align="center">
+  <img src="figures/07_wind_estimation.png" alt="Estimated disturbance vs true wind drag — PE caveat" width="780"/>
+</p>
+
+> **Estimate vs truth.** Blue: MRAC's compensation
+> $\hat\Theta^{\top}\Phi(v)$. Orange: the true matched disturbance
+> $\delta_{\rm true} = F_{\rm drag}/m$ (uses $v_w(t)$ which the controller
+> never sees). They share shape and order of magnitude but do **not**
+> coincide pointwise — and the theory does not require them to. MRAC is
+> tuned for *closed-loop UUB tracking*, not parameter identification.
+> Asking "why doesn't the blue match the orange exactly" misses the
+> point: it cannot, without persistent excitation, and it does not need
+> to.
 - **Mass mismatch** breaks the linear-in-parameters assumption. MRAC on the
   velocity loop assumes $\dot v = u + \Theta^\top\Phi(v)$ with
   $\hat\Theta$ independent of $u$. This breaks when $m_{actual} \ne m_{nominal}$,
@@ -634,6 +693,38 @@ The companion document [MRAC.md](MRAC.md) contains the full defense:
 the Lyapunov derivation, the rationale for σ-modification, the discussion
 of PE, the comparison with PID, and the literature. It is meant as a
 "defense-grade" knowledge document one can reference verbatim.
+
+### 9.4 Figure gallery
+
+Other diagnostic plots produced by `scripts/generate_report.py`:
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="figures/02_xy_topdown.png" alt="Top-down + cylindrical projection" width="380"/><br/>
+      <sub><b>Fig 2</b> — top-down (X vs Y) and cylindrical
+      $\sqrt{(x-x_t)^2+(y-y_t)^2}$ vs $z$. The shaded disk is the
+      ε-ball.</sub>
+    </td>
+    <td align="center">
+      <img src="figures/03_state_signals.png" alt="Pos, vel, euler signals" width="380"/><br/>
+      <sub><b>Fig 3</b> — position, velocity and Euler angles over time;
+      PID dashed, MRAC solid.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="figures/09_control_signals.png" alt="Motor thrusts" width="380"/><br/>
+      <sub><b>Fig 9</b> — per-motor thrusts. Saturation at 5 N (red dashed)
+      is briefly hit during the most aggressive maneuvers.</sub>
+    </td>
+    <td align="center">
+      <img src="figures/01_trajectory_3d.png" alt="3D trajectory" width="380"/><br/>
+      <sub><b>Fig 1</b> — 3D trajectory comparison. The wireframe sphere
+      around the target is the ε-ball.</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 

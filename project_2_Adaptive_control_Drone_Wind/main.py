@@ -94,6 +94,8 @@ if __name__ == "__main__":
     # ---- interactive Plotly dashboard ---------------------------------------
     print("Building interactive Plotly dashboard...")
     build_dashboard(data_pid, data_mrac, target_pos,
+                    mrac_history=ctrl_mrac.history_arrays(),
+                    gamma=3.0,
                     save_path='dashboard.html', target_fps=10)
     print("  -> open dashboard.html in a browser; drag the 3D panel during playback")
 
