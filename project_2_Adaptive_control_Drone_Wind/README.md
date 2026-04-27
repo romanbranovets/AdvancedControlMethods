@@ -694,7 +694,22 @@ the Lyapunov derivation, the rationale for σ-modification, the discussion
 of PE, the comparison with PID, and the literature. It is meant as a
 "defense-grade" knowledge document one can reference verbatim.
 
-### 9.4 Figure gallery
+### 9.4 Interactive dashboard preview
+
+<p align="center">
+  <img src="dashboard.gif" alt="Interactive Plotly dashboard playback" width="900"/>
+</p>
+
+> Recording of the interactive dashboard ([dashboard.html](dashboard.html))
+> playing back. Four panels are synchronized by a single play/slider:
+> rotatable 3D, top-down X-Y, phase portrait $r$ vs $\dot r$, and
+> **real-time Lyapunov function $V(t)$** (bottom-right). The blue cursor
+> on the V-panel walks left-to-right as the drone moves; transient peaks
+> appear during maneuvers, then $V$ settles into a bounded region — exactly
+> the UUB behavior predicted by the inequality
+> $\dot V \le -a_m e^2 + (\sigma/2\gamma)\lVert\Theta^{*}\rVert^2$.
+
+### 9.5 Figure gallery
 
 Other diagnostic plots produced by `scripts/generate_report.py`:
 
