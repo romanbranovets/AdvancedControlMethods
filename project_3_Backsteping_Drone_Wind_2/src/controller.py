@@ -138,13 +138,11 @@ class BacksteppingVelocityController:
         a      — измеренное линейное ускорение (2,) [ax, az] (м/с²)
         tau    — измеренный момент по оси pitch [Н·м]
         I      — измеренные токи (2,) [I_L, I_R] [А]
+        theta  — текущий угол тангажа [рад]
+        omega  — текущая угловая скорость [рад/с]
 
     Возвращает:
         I_cmd  — команды токов (2,) [А]
-
-    Внутри: PD по скорости → желаемое ускорение → (T_des, θ_des);
-    ориентация и угловая скорость оцениваются по (a, tau) и памяти шага;
-    обратная задача моторов → I_des; backstepping по инерции тока (как в 1D).
     """
 
     def __init__(
@@ -181,27 +179,37 @@ class BacksteppingVelocityController:
         self.I_min = float(I_min)
         self.I_max = float(I_max)
 
-        self._theta_hat_prev = 0.0
+        # внутренние переменные
         self._I_des_prev = np.array([0.0, 0.0], dtype=float)
-        self._T_des_prev = 0.0
-        self._theta_des_prev = 0.0
-        self._omega_des_prev = 0.0
-
-    def reset(self, I_hover=None):
-        self._theta_hat_prev = 0.0
-        if I_hover is None:
-            self._I_des_prev = np.array([0.0, 0.0], dtype=float)
-        else:
-            self._I_des_prev = np.asarray(I_hover, dtype=float).reshape(2).copy()
         self._T_des_prev = self.m * self.g
         self._theta_des_prev = 0.0
         self._omega_des_prev = 0.0
 
-    def update(self, v_des, v, a, tau, I, dt):
+        # желаемые значения (для логирования)
+        self._theta_des = 0.0
+        self._omega_des = 0.0
+        self._T_des = 0.0
+        self._tau_des = 0.0
+        self._I_des = np.array([0.0, 0.0], dtype=float)
+
+    def reset(self, I_hover=None):
+        self._I_des_prev = np.zeros(2, dtype=float) if I_hover is None else np.asarray(I_hover, dtype=float).reshape(2).copy()
+        self._T_des_prev = self.m * self.g
+        self._theta_des_prev = 0.0
+        self._omega_des_prev = 0.0
+        self._theta_des = 0.0
+        self._omega_des = 0.0
+        self._T_des = 0.0
+        self._tau_des = 0.0
+        self._I_des = np.array([0.0, 0.0], dtype=float)
+
+    def update(self, v_des, v, a, tau, I, dt, theta, omega):
         """
         v_des, v, a: shape (2,)
         tau: float
         I: shape (2,)
+        theta: float
+        omega: float
         """
         if dt <= 0.0:
             return np.clip(np.asarray(I, dtype=float).reshape(2), self.I_min, self.I_max)
@@ -211,13 +219,6 @@ class BacksteppingVelocityController:
         a = np.asarray(a, dtype=float).reshape(2)
         I = np.asarray(I, dtype=float).reshape(2)
         tau = float(tau)
-
-        # --- оценка ориентации и угловой скорости по измеренному ускорению ---
-        az_p = float(a[1] + self.g)
-        ax_ = float(a[0])
-        theta_hat = float(np.arctan2(ax_, np.sign(az_p) * max(abs(az_p), 1e-3)))
-        omega_hat = (theta_hat - self._theta_hat_prev) / dt
-        self._theta_hat_prev = theta_hat
 
         # --- внешний контур по скорости ---
         e_v = v_des - v
@@ -234,18 +235,17 @@ class BacksteppingVelocityController:
         self._T_des_prev = T_des
         self._theta_des_prev = theta_des
 
-        # --- контур тангажа (виртуальная угловая скорость) ---
-        e_th = theta_des - theta_hat
+        # --- контур тангажа (используем переданные theta, omega) ---
+        e_th = theta_des - theta
         omega_des = self.k_theta * e_th + theta_des_dot
         omega_des_dot = (omega_des - self._omega_des_prev) / dt
         self._omega_des_prev = omega_des
 
         tau_ff = self.J * omega_des_dot
-        tau_fb = self.J * self.k_omega * (omega_des - omega_hat)
+        tau_fb = self.J * self.k_omega * (omega_des - omega)
         tau_des = tau_ff + tau_fb
-        # используем измеренный момент как мягкую подстройку (учёт несоответствия модели)
-        tau_meas = tau
-        tau_des = (1.0 - self.k_tau_blend) * tau_des + self.k_tau_blend * tau_meas
+        # мягкая подстройка по измеренному моменту
+        tau_des = (1.0 - self.k_tau_blend) * tau_des + self.k_tau_blend * tau
 
         # --- обратная задача: желаемые токи ---
         I_des = _inverse_motors(T_des, tau_des, self.L_arm, self.k_F, self.I_min, self.I_max)
@@ -256,7 +256,25 @@ class BacksteppingVelocityController:
         # --- backstepping по каналам тока ---
         I_cmd = I + self.tau_m * (I_des_dot - self.k_I * (I - I_des))
         I_cmd = np.clip(I_cmd, self.I_min, self.I_max)
+
+        # сохраняем желаемые значения для логирования
+        self._theta_des = theta_des
+        self._omega_des = omega_des
+        self._T_des = T_des
+        self._tau_des = tau_des
+        self._I_des = I_des.copy()
+
         return I_cmd
+
+    def get_desired(self):
+        """Возвращает словарь с желаемыми величинами, вычисленными на последнем шаге."""
+        return {
+            'theta_des': self._theta_des,
+            'omega_des': self._omega_des,
+            'T_des': self._T_des,
+            'tau_des': self._tau_des,
+            'I_des': self._I_des.copy()
+        }
 
 
 class PDVelocityMotorController:
@@ -275,23 +293,32 @@ class PDVelocityMotorController:
         self.theta_lim = float(theta_lim)
         self.I_min = float(I_min)
         self.I_max = float(I_max)
-        self._theta_hat_prev = 0.0
+
+        # желаемые величины для логирования
+        self._theta_des = 0.0
+        self._tau_des = 0.0
+        self._T_des = 0.0
+        self._I_des = np.array([0.0, 0.0], dtype=float)
 
     def reset(self, I_hover=None):
-        self._theta_hat_prev = 0.0
+        self._theta_des = 0.0
+        self._tau_des = 0.0
+        self._T_des = 0.0
+        self._I_des = np.array([0.0, 0.0], dtype=float)
 
-    def update(self, v_des, v, a, tau, I, dt):
+    def update(self, v_des, v, a, tau, I, dt, theta, omega):
+        """
+        v_des, v, a: shape (2,)
+        tau, theta, omega: float
+        I: shape (2,)
+        """
         v_des = np.asarray(v_des, dtype=float).reshape(2)
         v = np.asarray(v, dtype=float).reshape(2)
         a = np.asarray(a, dtype=float).reshape(2)
         if dt <= 0.0:
             return np.clip(np.asarray(I, dtype=float).reshape(2), self.I_min, self.I_max)
 
-        az_p = float(a[1] + self.g)
-        theta_hat = float(np.arctan2(a[0], np.sign(az_p) * max(abs(az_p), 1e-3)))
-        omega_hat = (theta_hat - self._theta_hat_prev) / dt
-        self._theta_hat_prev = theta_hat
-
+        # Внешний контур по скорости
         e_v = v_des - v
         a_des = self.kv * e_v
         an = float(np.linalg.norm(a_des))
@@ -301,10 +328,28 @@ class PDVelocityMotorController:
         T_des, theta_des = _allocate_thrust_pitch(self.m, self.g, a_des[0], a_des[1], self.theta_lim)
         T_des = float(np.clip(T_des, 1e-3, 2.0 * self.k_F * self.I_max ** 2))
 
-        e_th = theta_des - theta_hat
-        tau_des = self.J * (self.k_th * e_th - self.k_w * omega_hat)
+        # Контур тангажа (используем измеренные theta, omega)
+        e_th = theta_des - theta
+        tau_des = self.J * (self.k_th * e_th - self.k_w * omega)
         tau_des = float(np.clip(tau_des, -self.L_arm * self.k_F * self.I_max ** 2,
                                 self.L_arm * self.k_F * self.I_max ** 2))
 
         I_cmd = _inverse_motors(T_des, tau_des, self.L_arm, self.k_F, self.I_min, self.I_max)
-        return np.clip(I_cmd, self.I_min, self.I_max)
+        I_cmd = np.clip(I_cmd, self.I_min, self.I_max)
+
+        # сохраняем желаемые значения
+        self._theta_des = theta_des
+        self._tau_des = tau_des
+        self._T_des = T_des
+        self._I_des = I_cmd.copy()  # команда – это желаемый ток без динамики мотора
+
+        return I_cmd
+
+    def get_desired(self):
+        return {
+            'theta_des': self._theta_des,
+            'omega_des': 0.0,      # PD-контроллер не вычисляет явно желаемую угловую скорость
+            'T_des': self._T_des,
+            'tau_des': self._tau_des,
+            'I_des': self._I_des.copy()
+        }
