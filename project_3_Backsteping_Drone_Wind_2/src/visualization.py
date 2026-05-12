@@ -74,7 +74,6 @@ def visualize_1d_compare(data_main, data_baseline,
     ax_err.grid(True)
     cursor, = ax_err.plot([], [], 'ko', markersize=6)
 
-    # Время – выводим через fig.text
     time_text = fig.text(0.5, 0.02, '', ha='center', fontsize=10)
 
     def update(frame):
@@ -88,8 +87,79 @@ def visualize_1d_compare(data_main, data_baseline,
         cursor.set_data([t[f]], [err_main[f]])
 
         time_text.set_text(f't = {t[f]:.2f} с')
-        # Возвращаем только axes-художников, time_text исключаем
         return point_main, point_base, cursor
+
+    ani = FuncAnimation(fig, update, frames=len(idx),
+                        interval=1000 / target_fps, blit=False, repeat=True)
+    fig._ani_ref = ani
+
+    if save_path:
+        try:
+            ani.save(save_path, writer='pillow', fps=target_fps, dpi=save_dpi)
+            print(f"[viz] saved {save_path}")
+        except Exception as e:
+            print(f"[viz] save failed: {e}")
+
+    if show:
+        plt.show()
+    return ani
+
+
+def visualize_2d_drone(data, L_body=0.36, target_fps=25, show=True,
+                       save_path=None, save_dpi=120):
+    """
+    Анимация дрона в плоскости x–z: корпус как прямоугольник, ориентация по θ.
+    data — результат run_simulation_2d.
+    """
+    t = data['t']
+    s = data['states']
+    v_des = data['v_des']
+
+    dt_sim = np.median(np.diff(t)) if len(t) > 1 else 0.005
+    stride = max(1, int(round(1.0 / (target_fps * dt_sim))))
+    idx = np.arange(0, len(t), stride)
+    if idx[-1] != len(t) - 1:
+        idx = np.append(idx, len(t) - 1)
+
+    fig, (ax_world, ax_ev) = plt.subplots(1, 2, figsize=(11, 5),
+                                          gridspec_kw={'width_ratios': [1.2, 1]})
+
+    pad = 1.0
+    x_all, z_all = s[:, 0], s[:, 1]
+    ax_world.set_xlim(x_all.min() - pad, x_all.max() + pad)
+    ax_world.set_ylim(z_all.min() - pad, z_all.max() + pad)
+    ax_world.set_aspect('equal', adjustable='box')
+    ax_world.set_xlabel('x [м]')
+    ax_world.set_ylabel('z [м]')
+    ax_world.set_title('Движение в плоскости')
+    ax_world.grid(True, alpha=0.3)
+
+    traj, = ax_world.plot([], [], 'b-', alpha=0.35, linewidth=1)
+    body_line, = ax_world.plot([], [], '-', color='0.2', lw=3, solid_capstyle='round')
+
+    ev = np.linalg.norm(s[:, 2:4] - v_des.reshape(1, 2), axis=1)
+    ax_ev.plot(t, ev, 'k-', alpha=0.5)
+    cursor_ev, = ax_ev.plot([], [], 'ro', markersize=5)
+    ax_ev.set_xlim(0, t[-1])
+    ax_ev.set_ylim(0, max(ev.max(), 1e-3) * 1.1)
+    ax_ev.set_xlabel('t [с]')
+    ax_ev.set_ylabel('||v - v*|| [м/с]')
+    ax_ev.set_title('Ошибка скорости')
+    ax_ev.grid(True)
+
+    time_text = fig.text(0.5, 0.02, '', ha='center', fontsize=10)
+
+    def update(frame):
+        f = idx[frame]
+        x, z, _, _, theta = s[f, 0], s[f, 1], s[f, 2], s[f, 3], s[f, 4]
+        traj.set_data(s[: f + 1, 0], s[: f + 1, 1])
+        ct, st = np.cos(theta), np.sin(theta)
+        hx = 0.5 * L_body * ct
+        hz = 0.5 * L_body * st
+        body_line.set_data([x - hx, x + hx], [z - hz, z + hz])
+        cursor_ev.set_data([t[f]], [ev[f]])
+        time_text.set_text(f't = {t[f]:.2f} с, vx*={v_des[0]:.2f}, vz*={v_des[1]:.2f}')
+        return traj, body_line, cursor_ev
 
     ani = FuncAnimation(fig, update, frames=len(idx),
                         interval=1000 / target_fps, blit=False, repeat=True)

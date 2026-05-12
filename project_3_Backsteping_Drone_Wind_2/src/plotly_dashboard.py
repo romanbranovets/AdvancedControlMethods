@@ -86,3 +86,73 @@ def build_dashboard(data_pid, data_bs, label_pid='PID', label_bs='Backstepping',
     fig.write_html(save_path, include_plotlyjs='cdn', auto_play=False)
     print(f"[plotly] dashboard saved to {save_path}")
     return fig
+
+
+def build_dashboard_2d(data_pd, data_bs, label_pd='PD+инверсия', label_bs='Backstepping',
+                       save_path='dashboard_2d.html', title='2D velocity tracking'):
+    """Траектории x–z для двух регуляторов + слайдер по времени."""
+    try:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+    except ImportError:
+        raise RuntimeError("plotly required. Install with `pip install plotly`.")
+
+    x1, z1 = data_pd['states'][:, 0], data_pd['states'][:, 1]
+    x2, z2 = data_bs['states'][:, 0], data_bs['states'][:, 1]
+    t1, t2 = data_pd['t'], data_bs['t']
+
+    fig = make_subplots(rows=1, cols=1, subplot_titles=['Плоскость x–z'])
+
+    fig.add_trace(go.Scatter(x=x1, y=z1, mode='lines', name=label_pd,
+                             line=dict(color='gray', dash='dot')))
+    fig.add_trace(go.Scatter(x=x2, y=z2, mode='lines', name=label_bs,
+                             line=dict(color='blue')))
+    fig.add_trace(go.Scatter(x=[x1[0]], y=[z1[0]], mode='markers',
+                             marker=dict(size=8, color='gray'), showlegend=False))
+    fig.add_trace(go.Scatter(x=[x2[0]], y=[z2[0]], mode='markers',
+                             marker=dict(size=10, color='blue'), showlegend=False))
+
+    n = max(len(t1), len(t2))
+    stride = max(1, n // 150)
+    frames = []
+    for i in range(0, n, stride):
+        i1 = min(i, len(t1) - 1)
+        i2 = min(i, len(t2) - 1)
+        frames.append(go.Frame(
+            data=[
+                go.Scatter(x=x1, y=z1, mode='lines', name=label_pd,
+                           line=dict(color='gray', dash='dot')),
+                go.Scatter(x=x2, y=z2, mode='lines', name=label_bs,
+                           line=dict(color='blue')),
+                go.Scatter(x=[x1[i1]], y=[z1[i1]], mode='markers',
+                           marker=dict(size=8, color='gray'), showlegend=False),
+                go.Scatter(x=[x2[i2]], y=[z2[i2]], mode='markers',
+                           marker=dict(size=10, color='blue'), showlegend=False),
+            ],
+            name=f't={max(t1[i1], t2[i2]):.2f}',
+        ))
+
+    fig.frames = frames
+    fig.update_xaxes(title_text='x, м')
+    fig.update_yaxes(title_text='z, м', scaleanchor='x', scaleratio=1)
+
+    fig.update_layout(
+        title=title,
+        updatemenus=[dict(type='buttons', showactive=False,
+                          buttons=[
+                              dict(label='▶', method='animate',
+                                   args=[None, dict(frame=dict(duration=40, redraw=True),
+                                                    fromcurrent=True)]),
+                              dict(label='⏸', method='animate',
+                                   args=[[None], dict(frame=dict(duration=0, redraw=False),
+                                                      mode='immediate')]),
+                          ])],
+        sliders=[dict(steps=[dict(method='animate',
+                                  args=[[f.name], dict(mode='immediate',
+                                                       frame=dict(duration=0, redraw=True))],
+                                  label=f.name) for f in frames])],
+    )
+
+    fig.write_html(save_path, include_plotlyjs='cdn', auto_play=False)
+    print(f"[plotly] 2D dashboard saved to {save_path}")
+    return fig
