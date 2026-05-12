@@ -186,6 +186,8 @@ class BacksteppingVelocityController:
         self._T_des_prev = 0.0
         self._theta_des_prev = 0.0
         self._omega_des_prev = 0.0
+        self.last_lyapunov = None
+        self.last_lyapunov_terms = None
 
     def reset(self, I_hover=None):
         self._theta_hat_prev = 0.0
@@ -196,6 +198,8 @@ class BacksteppingVelocityController:
         self._T_des_prev = self.m * self.g
         self._theta_des_prev = 0.0
         self._omega_des_prev = 0.0
+        self.last_lyapunov = None
+        self.last_lyapunov_terms = None
 
     def update(self, v_des, v, a, tau, I, dt):
         """
@@ -204,6 +208,8 @@ class BacksteppingVelocityController:
         I: shape (2,)
         """
         if dt <= 0.0:
+            self.last_lyapunov = None
+            self.last_lyapunov_terms = None
             return np.clip(np.asarray(I, dtype=float).reshape(2), self.I_min, self.I_max)
 
         v_des = np.asarray(v_des, dtype=float).reshape(2)
@@ -253,22 +259,42 @@ class BacksteppingVelocityController:
         I_des_dot = (I_des - self._I_des_prev) / dt
         self._I_des_prev = I_des.copy()
 
-        # --- backstepping по каналам тока ---
+        # --- Lyapunov-like certificate (quadratic in tracking errors) ---
+        e_I = I - I_des
+        e_om = omega_des - omega_hat
+        c_th = self.m * self.g * 0.08
+        c_I = self.k_I * self.tau_m
+        V_vel = 0.5 * self.m * float(np.dot(e_v, e_v))
+        V_pitch = 0.5 * c_th * (e_th ** 2)
+        V_omega = 0.5 * self.J * (e_om ** 2)
+        V_curr = 0.5 * c_I * float(np.dot(e_I, e_I))
+        self.last_lyapunov = float(V_vel + V_pitch + V_omega + V_curr)
+        self.last_lyapunov_terms = {
+            'V_vel': V_vel,
+            'V_pitch': V_pitch,
+            'V_omega': V_omega,
+            'V_current': V_curr,
+        }
+
+        # Backstepping on motor-current dynamics
         I_cmd = I + self.tau_m * (I_des_dot - self.k_I * (I - I_des))
         I_cmd = np.clip(I_cmd, self.I_min, self.I_max)
         return I_cmd
 
 
-class PDVelocityMotorController:
-    """Базовый каскад: PD по скорости → (T_des, θ_des), PD по углу → τ_des, статическая инверсия моторов."""
+class _VelocityMotorCascadeBase:
+    """
+    Shared cascade: desired translational acceleration -> (T_des, theta_des)
+    -> inner torque PD on estimated pitch -> motor inversion.
+    Subclasses implement _accel_des(v_des, v, a, dt).
+    """
 
-    def __init__(self, m, g, J, L_arm, k_F, kv, k_th, k_w, a_lim, theta_lim, I_min, I_max):
+    def __init__(self, m, g, J, L_arm, k_F, k_th, k_w, a_lim, theta_lim, I_min, I_max):
         self.m = float(m)
         self.g = float(g)
         self.J = float(J)
         self.L_arm = float(L_arm)
         self.k_F = float(k_F)
-        self.kv = float(kv)
         self.k_th = float(k_th)
         self.k_w = float(k_w)
         self.a_lim = float(a_lim)
@@ -279,6 +305,13 @@ class PDVelocityMotorController:
 
     def reset(self, I_hover=None):
         self._theta_hat_prev = 0.0
+        self._reset_extra()
+
+    def _reset_extra(self):
+        pass
+
+    def _accel_des(self, v_des, v, a, dt):
+        raise NotImplementedError
 
     def update(self, v_des, v, a, tau, I, dt):
         v_des = np.asarray(v_des, dtype=float).reshape(2)
@@ -292,8 +325,7 @@ class PDVelocityMotorController:
         omega_hat = (theta_hat - self._theta_hat_prev) / dt
         self._theta_hat_prev = theta_hat
 
-        e_v = v_des - v
-        a_des = self.kv * e_v
+        a_des = self._accel_des(v_des, v, a, dt)
         an = float(np.linalg.norm(a_des))
         if an > self.a_lim and an > 0:
             a_des = a_des * (self.a_lim / an)
@@ -303,8 +335,56 @@ class PDVelocityMotorController:
 
         e_th = theta_des - theta_hat
         tau_des = self.J * (self.k_th * e_th - self.k_w * omega_hat)
-        tau_des = float(np.clip(tau_des, -self.L_arm * self.k_F * self.I_max ** 2,
-                                self.L_arm * self.k_F * self.I_max ** 2))
+        tau_max = self.L_arm * self.k_F * self.I_max ** 2
+        tau_des = float(np.clip(tau_des, -tau_max, tau_max))
 
         I_cmd = _inverse_motors(T_des, tau_des, self.L_arm, self.k_F, self.I_min, self.I_max)
         return np.clip(I_cmd, self.I_min, self.I_max)
+
+
+class PVelocityMotorController(_VelocityMotorCascadeBase):
+    """Outer loop: proportional on velocity error only (constant v_des assumed for tuning)."""
+
+    def __init__(self, m, g, J, L_arm, k_F, kp, k_th, k_w, a_lim, theta_lim, I_min, I_max):
+        super().__init__(m, g, J, L_arm, k_F, k_th, k_w, a_lim, theta_lim, I_min, I_max)
+        self.kp = float(kp)
+
+    def _accel_des(self, v_des, v, a, dt):
+        return self.kp * (v_des - v)
+
+
+class PDVelocityMotorController(_VelocityMotorCascadeBase):
+    """
+    Outer loop: P on velocity + D using inertial acceleration (for constant v_des, de/dt = -a).
+    """
+
+    def __init__(self, m, g, J, L_arm, k_F, kp, kd, k_th, k_w, a_lim, theta_lim, I_min, I_max):
+        super().__init__(m, g, J, L_arm, k_F, k_th, k_w, a_lim, theta_lim, I_min, I_max)
+        self.kp = float(kp)
+        self.kd = float(kd)
+
+    def _accel_des(self, v_des, v, a, dt):
+        e = v_des - v
+        return self.kp * e - self.kd * a
+
+
+class PIDVelocityMotorController(_VelocityMotorCascadeBase):
+    """Outer loop: PD as above + integral on velocity error (with clamp)."""
+
+    def __init__(self, m, g, J, L_arm, k_F, kp, kd, ki, k_th, k_w, a_lim, theta_lim,
+                 I_min, I_max, integral_limit=2.5):
+        super().__init__(m, g, J, L_arm, k_F, k_th, k_w, a_lim, theta_lim, I_min, I_max)
+        self.kp = float(kp)
+        self.kd = float(kd)
+        self.ki = float(ki)
+        self.integral_limit = float(integral_limit)
+        self._int_e = np.zeros(2, dtype=float)
+
+    def _reset_extra(self):
+        self._int_e[:] = 0.0
+
+    def _accel_des(self, v_des, v, a, dt):
+        e = v_des - v
+        self._int_e += e * dt
+        self._int_e = np.clip(self._int_e, -self.integral_limit, self.integral_limit)
+        return self.kp * e - self.kd * a + self.ki * self._int_e
