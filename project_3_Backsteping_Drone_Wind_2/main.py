@@ -2,15 +2,25 @@
 import numpy as np
 
 from src.system import PlanarDrone2D
-from src.controller import BacksteppingVelocityController, PDVelocityMotorController
+from src.controller import (
+    BacksteppingVelocityController,
+    PVelocityMotorController,
+    PDVelocityMotorController,
+    PIDVelocityMotorController,
+)
 from src.simulation import run_simulation_2d
-from src.plots import plot_results_2d_extended, plot_compare_2d_extended
+from src.plots import (
+    plot_results_2d,
+    plot_velocity_controllers_comparison,
+    plot_overshoot_comparison,
+    plot_lyapunov_certificate,
+)
 from src.visualization import visualize_2d_drone
 from src.plotly_dashboard import build_dashboard_2d
 
 
 def wind_field_2d(t):
-    """Ветер (силы в Н) и слабый внешний момент по pitch [Н·м]."""
+    """Wind forces [N] and small external pitch torque [N·m]."""
     wx = 0.12 * np.sin(0.85 * t) + 0.05
     wz = 0.08 * np.cos(1.1 * t)
     w_tau = 0.008 * np.sin(2.2 * t)
@@ -37,51 +47,91 @@ if __name__ == "__main__":
     z0 = float(rng.uniform(2.0, 5.0))
     initial_state = np.array([x0, z0, 0.0, 0.0, 0.0, 0.0, I0[0], I0[1]], dtype=float)
 
-    v_des = np.array([0.8, 0.0], dtype=float)
+    target_pos = np.array([6.0, 4.0], dtype=float)
+    v_des = np.zeros(2, dtype=float)
 
-    sim_kwargs = dict(t_max=18.0, dt=0.004, vel_tol=0.06, hold_steps=100, verbose=True)
+    # Same horizon for fair comparison (no early stop).
+    sim_kwargs = dict(
+        t_max=18.0,
+        dt=0.004,
+        vel_tol=0.06,
+        pos_tol=0.07,
+        hold_steps=100,
+        verbose=False,
+        early_stop=False,
+        target_pos=target_pos,
+        pos_gain=0.7,
+        v_max=1.35,
+    )
 
-    print("2D planar drone - velocity tracking")
-    print(f"  start (x,z)=({x0:.2f}, {z0:.2f}) m, v_des=({v_des[0]:.2f}, {v_des[1]:.2f}) m/s")
+    k_th, k_w = 9.0, 5.0
+    a_lim, th_lim = 6.0, 0.45
+    I_min, I_max = 0.0, 16.0
 
+    ctrl_p = PVelocityMotorController(
+        m, g, J, L_arm, k_F, kp=3.0, k_th=k_th, k_w=k_w,
+        a_lim=a_lim, theta_lim=th_lim, I_min=I_min, I_max=I_max,
+    )
     ctrl_pd = PDVelocityMotorController(
-        m=m, g=g, J=J, L_arm=L_arm, k_F=k_F,
-        kv=2.8, k_th=9.0, k_w=5.0,
-        a_lim=6.0, theta_lim=0.45, I_min=0.0, I_max=16.0,
+        m, g, J, L_arm, k_F, kp=2.85, kd=0.38, k_th=k_th, k_w=k_w,
+        a_lim=a_lim, theta_lim=th_lim, I_min=I_min, I_max=I_max,
+    )
+    ctrl_pid = PIDVelocityMotorController(
+        m, g, J, L_arm, k_F, kp=2.75, kd=0.35, ki=0.22, k_th=k_th, k_w=k_w,
+        a_lim=a_lim, theta_lim=th_lim, I_min=I_min, I_max=I_max,
+        integral_limit=3.0,
     )
     ctrl_bs = BacksteppingVelocityController(
         m=m, g=g, J=J, L_arm=L_arm, k_F=k_F, tau_m=tau_m,
         kv=2.4, k_theta=5.0, k_omega=4.0, k_I=14.0, k_tau_blend=0.12,
-        a_lim=5.5, theta_lim=0.42, I_min=0.0, I_max=16.0,
+        a_lim=5.5, theta_lim=0.42, I_min=I_min, I_max=I_max,
     )
 
-    print("\n[1/2] PD + static motor inversion ...")
-    data_pd = run_simulation_2d(system, ctrl_pd, wind_field_2d,
-                                initial_state.copy(), v_des, **sim_kwargs)
-    ev_pd = np.linalg.norm(data_pd['states'][-1, 2:4] - v_des)
-    print(f"      final ||v-v*|| = {ev_pd:.4f} m/s, t_end = {data_pd['t'][-1]:.2f} s")
+    print("2D planar drone - target-point tracking (P / PD / PID / Backstepping)")
+    print(
+        f"  start (x,z)=({x0:.2f}, {z0:.2f}) m, "
+        f"target=({target_pos[0]:.2f}, {target_pos[1]:.2f}) m"
+    )
 
-    print("\n[2/2] Backstepping (motor dynamics) ...")
-    data_bs = run_simulation_2d(system, ctrl_bs, wind_field_2d,
-                                initial_state.copy(), v_des, **sim_kwargs)
-    ev_bs = np.linalg.norm(data_bs['states'][-1, 2:4] - v_des)
-    print(f"      final ||v-v*|| = {ev_bs:.4f} m/s, t_end = {data_bs['t'][-1]:.2f} s")
+    controllers = [
+        ("P", ctrl_p),
+        ("PD", ctrl_pd),
+        ("PID", ctrl_pid),
+        ("Backstepping", ctrl_bs),
+    ]
 
-    # Расширенные графики для одного контроллера (Backstepping)
-    plot_results_2d_extended(data_bs, save_path='results_2d_bs_ext.png', show=False)
-    print("Saved: results_2d_bs_ext.png")
+    datasets = []
+    labels = []
+    for name, ctrl in controllers:
+        print(f"  running {name} ...")
+        d = run_simulation_2d(
+            system, ctrl, wind_field_2d,
+            initial_state.copy(), v_des, **sim_kwargs,
+        )
+        epf = np.linalg.norm(d['states'][-1, 0:2] - target_pos)
+        print(f"    final ||p-p*|| = {epf:.4f} m, t_end = {d['t'][-1]:.2f} s")
+        datasets.append(d)
+        labels.append(name)
 
-    # Сравнение двух контроллеров по всем параметрам
-    plot_compare_2d_extended(data_pd, data_bs,
-                             label_pd='PD+inv', label_bs='Backstepping',
-                             save_path='compare_2d_ext.png', show=False)
-    print("Saved: compare_2d_ext.png")
+    plot_velocity_controllers_comparison(
+        datasets, labels, save_path='controllers_comparison.png', show=False,
+    )
+    plot_overshoot_comparison(
+        datasets, labels, save_path='overshoot_comparison.png', show=False,
+    )
+    plot_results_2d(datasets[-1], save_path='results_2d_backstepping.png', show=False)
+    plot_lyapunov_certificate(datasets[-1], save_path='lyapunov_certificate.png', show=False)
+    print(
+        "Saved: controllers_comparison.png, overshoot_comparison.png, "
+        "results_2d_backstepping.png, lyapunov_certificate.png"
+    )
 
-    # Интерактивная панель и анимация (без изменений)
-    build_dashboard_2d(data_pd, data_bs, save_path='dashboard_2d.html')
-    print("Saved: dashboard_2d.html")
+    # Plotly: compare PD vs Backstepping trajectories (representative linear controllers vs BS)
+    build_dashboard_2d(datasets[1], datasets[3], label_pd='PD', label_bs='Backstepping',
+                       save_path='dashboard_2d.html')
+    print("  -> open dashboard_2d.html in a browser")
 
     print("Creating 2D animation (Backstepping)...")
-    visualize_2d_drone(data_bs, L_body=0.34, target_fps=22,
+    visualize_2d_drone(datasets[3], L_body=0.34, target_fps=22,
                        save_path='drone_2d.gif', show=False)
     print("Saved: drone_2d.gif")

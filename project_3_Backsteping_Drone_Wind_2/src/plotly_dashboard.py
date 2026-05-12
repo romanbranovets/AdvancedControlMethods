@@ -18,7 +18,7 @@ def build_dashboard(data_pid, data_bs, label_pid='PID', label_bs='Backstepping',
     t_bs  = data_bs['t'];  z_bs  = data_bs['states'][:, 0]
 
     fig = make_subplots(rows=1, cols=1,
-                        subplot_titles=['Высота дрона'],
+                        subplot_titles=['Drone height'],
                         specs=[[{"secondary_y": False}]])
 
     # Статические линии
@@ -30,7 +30,7 @@ def build_dashboard(data_pid, data_bs, label_pid='PID', label_bs='Backstepping',
                   row=1, col=1)
     if target is not None:
         fig.add_hline(y=target, line_dash="dash", line_color="red",
-                      annotation_text=f"z_des = {target:.1f} м")
+                      annotation_text=f"z_des = {target:.1f} m")
 
     # Анимированные точки (последнее положение)
     fig.add_trace(go.Scatter(x=[t_pid[0]], y=[z_pid[0]], mode='markers',
@@ -66,8 +66,8 @@ def build_dashboard(data_pid, data_bs, label_pid='PID', label_bs='Backstepping',
 
     fig.update_layout(
         title=title,
-        xaxis_title='Время, с',
-        yaxis_title='Высота, м',
+        xaxis_title='Time [s]',
+        yaxis_title='Height [m]',
         updatemenus=[dict(type='buttons', showactive=False,
                           buttons=[
                               dict(label='▶', method='animate',
@@ -88,7 +88,7 @@ def build_dashboard(data_pid, data_bs, label_pid='PID', label_bs='Backstepping',
     return fig
 
 
-def build_dashboard_2d(data_pd, data_bs, label_pd='PD+инверсия', label_bs='Backstepping',
+def build_dashboard_2d(data_pd, data_bs, label_pd='PD + inversion', label_bs='Backstepping',
                        save_path='dashboard_2d.html', title='2D velocity tracking'):
     """Траектории x–z для двух регуляторов + слайдер по времени."""
     try:
@@ -101,7 +101,7 @@ def build_dashboard_2d(data_pd, data_bs, label_pd='PD+инверсия', label_b
     x2, z2 = data_bs['states'][:, 0], data_bs['states'][:, 1]
     t1, t2 = data_pd['t'], data_bs['t']
 
-    fig = make_subplots(rows=1, cols=1, subplot_titles=['Плоскость x–z'])
+    fig = make_subplots(rows=1, cols=1, subplot_titles=['x–z plane'])
 
     fig.add_trace(go.Scatter(x=x1, y=z1, mode='lines', name=label_pd,
                              line=dict(color='gray', dash='dot')))
@@ -133,8 +133,8 @@ def build_dashboard_2d(data_pd, data_bs, label_pd='PD+инверсия', label_b
         ))
 
     fig.frames = frames
-    fig.update_xaxes(title_text='x, м')
-    fig.update_yaxes(title_text='z, м', scaleanchor='x', scaleratio=1)
+    fig.update_xaxes(title_text='x [m]')
+    fig.update_yaxes(title_text='z [m]', scaleanchor='x', scaleratio=1)
 
     fig.update_layout(
         title=title,
