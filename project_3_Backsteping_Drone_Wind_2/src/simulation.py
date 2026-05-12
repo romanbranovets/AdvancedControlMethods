@@ -90,7 +90,7 @@ def run_simulation_2d(
     verbose=True,
 ):
     """
-    Симуляция планарного дрона. Регулятор: update(v_des, v, a, tau, I, dt) -> I_cmd (2,).
+    Симуляция планарного дрона. Регулятор: update(v_des, v, a, tau, I, dt, theta, omega) -> I_cmd (2,).
 
     Состояние: [x, z, vx, vz, theta, omega, I_L, I_R]
     """
@@ -102,6 +102,10 @@ def run_simulation_2d(
         controller.reset(I_hover=I_hover)
 
     times, states, controls, winds, taus, accels = [], [], [], [], [], []
+    desired_records = []      # theta_des, omega_des, I_L_des, I_R_des, tau_des, T_des
+    pos_des_records = []      # x_des, z_des
+
+    x0, z0 = float(initial_state[0]), float(initial_state[1])
 
     n_steps = int(np.ceil(t_max / dt))
     u = I_hover.copy()
@@ -126,7 +130,18 @@ def run_simulation_2d(
 
         a_meas = np.array([ax, az], dtype=float)
 
-        u = controller.update(v_des, np.array([vx, vz]), a_meas, tau, np.array([I_L, I_R]), dt)
+        # Вызов контроллера с передачей theta и omega
+        u = controller.update(v_des, np.array([vx, vz]), a_meas, tau,
+                              np.array([I_L, I_R]), dt, theta, omega)
+
+        # Сохранение желаемых величин
+        desired = controller.get_desired()
+        desired_records.append([desired['theta_des'], desired['omega_des'],
+                                desired['I_des'][0], desired['I_des'][1],
+                                desired['tau_des'], desired['T_des']])
+
+        # Желаемая позиция (интеграл от постоянной v_des)
+        pos_des_records.append([x0 + v_des[0] * t, z0 + v_des[1] * t])
 
         state = rk4_step(system, state, t, dt, u, wind_func)
         t += dt
@@ -161,4 +176,6 @@ def run_simulation_2d(
         'taus': np.array(taus),
         'accels': np.array(accels),
         'v_des': v_des.copy(),
+        'desired': np.array(desired_records),   # shape (N, 6)
+        'pos_des': np.array(pos_des_records),   # shape (N, 2)
     }

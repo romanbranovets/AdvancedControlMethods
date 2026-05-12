@@ -4,7 +4,7 @@ import numpy as np
 from src.system import PlanarDrone2D
 from src.controller import BacksteppingVelocityController, PDVelocityMotorController
 from src.simulation import run_simulation_2d
-from src.plots import plot_results_2d, plot_compare_2d
+from src.plots import plot_results_2d_extended, plot_compare_2d_extended
 from src.visualization import visualize_2d_drone
 from src.plotly_dashboard import build_dashboard_2d
 
@@ -67,12 +67,19 @@ if __name__ == "__main__":
     ev_bs = np.linalg.norm(data_bs['states'][-1, 2:4] - v_des)
     print(f"      final ||v-v*|| = {ev_bs:.4f} m/s, t_end = {data_bs['t'][-1]:.2f} s")
 
-    plot_results_2d(data_bs, save_path='results_2d_bs.png', show=False)
-    plot_compare_2d(data_pd, data_bs, save_path='compare_2d.png', show=False)
-    print("Saved: results_2d_bs.png, compare_2d.png")
+    # Расширенные графики для одного контроллера (Backstepping)
+    plot_results_2d_extended(data_bs, save_path='results_2d_bs_ext.png', show=False)
+    print("Saved: results_2d_bs_ext.png")
 
+    # Сравнение двух контроллеров по всем параметрам
+    plot_compare_2d_extended(data_pd, data_bs,
+                             label_pd='PD+inv', label_bs='Backstepping',
+                             save_path='compare_2d_ext.png', show=False)
+    print("Saved: compare_2d_ext.png")
+
+    # Интерактивная панель и анимация (без изменений)
     build_dashboard_2d(data_pd, data_bs, save_path='dashboard_2d.html')
-    print("  -> open dashboard_2d.html in a browser")
+    print("Saved: dashboard_2d.html")
 
     print("Creating 2D animation (Backstepping)...")
     visualize_2d_drone(data_bs, L_body=0.34, target_fps=22,
