@@ -309,6 +309,7 @@ def plot_compare_2d(data_a, data_b, label_a='P', label_b='Backstepping',
         plt.close(fig)
 
 
+<<<<<<< HEAD
 def plot_velocity_controllers_comparison(datasets, labels, save_path=None, show=True):
     """
     Compare multiple 2D controllers (P, PD, PID, Backstepping, ...).
@@ -382,6 +383,64 @@ def plot_velocity_controllers_comparison(datasets, labels, save_path=None, show=
 
     fig.suptitle('Target-point tracking: controller comparison')
     fig.tight_layout()
+=======
+def plot_results_2d_extended(data, save_path=None, show=True):
+    """Расширенные графики: слева ошибки, справа величины для одного контроллера."""
+    t = data['t']
+    s = data['states']
+    desired = data['desired']   # theta_des, omega_des, I_L_des, I_R_des, tau_des, T_des
+    pos_des = data['pos_des']   # x_des, z_des
+    v_des = data['v_des']
+
+    x, z = s[:, 0], s[:, 1]
+    vx, vz = s[:, 2], s[:, 3]
+    theta = s[:, 4]
+    omega = s[:, 5]
+    I_L, I_R = s[:, 6], s[:, 7]
+    tau = data['taus']
+
+    # Ошибки
+    e_x = x - pos_des[:, 0]
+    e_z = z - pos_des[:, 1]
+    e_vx = vx - v_des[0]
+    e_vz = vz - v_des[1]
+    e_theta = theta - desired[:, 0]
+    e_omega = omega - desired[:, 1]
+    e_IL = I_L - desired[:, 2]
+    e_IR = I_R - desired[:, 3]
+    e_tau = tau - desired[:, 4]
+
+    fig, axes = plt.subplots(9, 2, figsize=(14, 20))
+    params = [
+        ('x',  e_x,    x,     'r'),
+        ('z',  e_z,    z,     'r'),
+        ('vx', e_vx,   vx,    'r'),
+        ('vz', e_vz,   vz,    'r'),
+        ('θ',  e_theta, theta, 'r'),
+        ('ω',  e_omega, omega, 'r'),
+        ('I_L', e_IL,  I_L,   'r'),
+        ('I_R', e_IR,  I_R,   'r'),
+        ('τ',  e_tau,  tau,   'r'),
+    ]
+
+    for i, (name, err, val, color) in enumerate(params):
+        ax_err = axes[i, 0]
+        ax_val = axes[i, 1]
+        ax_err.plot(t, err, color)
+        ax_err.set_ylabel(f'e_{name}')
+        ax_err.grid(True)
+        ax_val.plot(t, val, color)
+        ax_val.set_ylabel(name)
+        ax_val.grid(True)
+        if i == 0:
+            ax_err.set_title('Ошибки')
+            ax_val.set_title('Величины')
+
+    axes[-1, 0].set_xlabel('Время, с')
+    axes[-1, 1].set_xlabel('Время, с')
+    fig.tight_layout()
+
+>>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
     if save_path:
         fig.savefig(save_path, dpi=120)
     if show:
@@ -390,6 +449,7 @@ def plot_velocity_controllers_comparison(datasets, labels, save_path=None, show=
         plt.close(fig)
 
 
+<<<<<<< HEAD
 def plot_overshoot_comparison(datasets, labels, save_path=None, show=True):
     """Plot target-point overshoot for several controllers."""
     if len(datasets) != len(labels):
@@ -433,11 +493,85 @@ def plot_overshoot_comparison(datasets, labels, save_path=None, show=True):
 
     fig.suptitle('Target-point overshoot comparison')
     fig.tight_layout()
+=======
+def plot_compare_2d_extended(data_pd, data_bs, label_pd='PD+инверсия',
+                             label_bs='Backstepping', save_path=None, show=True):
+    """Сравнение двух контроллеров: для каждого параметра слева ошибка, справа величина."""
+    t1, t2 = data_pd['t'], data_bs['t']
+    s1 = data_pd['states']
+    s2 = data_bs['states']
+    desired1 = data_pd['desired']
+    desired2 = data_bs['desired']
+    pos1 = data_pd['pos_des']
+    pos2 = data_bs['pos_des']
+    v_des = data_pd['v_des']
+
+    # Извлекаем переменные
+    x1, z1 = s1[:, 0], s1[:, 1]
+    vx1, vz1 = s1[:, 2], s1[:, 3]
+    theta1, omega1 = s1[:, 4], s1[:, 5]
+    IL1, IR1 = s1[:, 6], s1[:, 7]
+    tau1 = data_pd['taus']
+
+    x2, z2 = s2[:, 0], s2[:, 1]
+    vx2, vz2 = s2[:, 2], s2[:, 3]
+    theta2, omega2 = s2[:, 4], s2[:, 5]
+    IL2, IR2 = s2[:, 6], s2[:, 7]
+    tau2 = data_bs['taus']
+
+    # Ошибки
+    e_x1, e_x2 = x1 - pos1[:, 0], x2 - pos2[:, 0]
+    e_z1, e_z2 = z1 - pos1[:, 1], z2 - pos2[:, 1]
+    e_vx1, e_vx2 = vx1 - v_des[0], vx2 - v_des[0]
+    e_vz1, e_vz2 = vz1 - v_des[1], vz2 - v_des[1]
+    e_th1, e_th2 = theta1 - desired1[:, 0], theta2 - desired2[:, 0]
+    e_om1, e_om2 = omega1 - desired1[:, 1], omega2 - desired2[:, 1]
+    e_IL1, e_IL2 = IL1 - desired1[:, 2], IL2 - desired2[:, 2]
+    e_IR1, e_IR2 = IR1 - desired1[:, 3], IR2 - desired2[:, 3]
+    e_tau1, e_tau2 = tau1 - desired1[:, 4], tau2 - desired2[:, 4]
+
+    params = [
+        ('x',  (e_x1, e_x2),   (x1, x2)),
+        ('z',  (e_z1, e_z2),   (z1, z2)),
+        ('vx', (e_vx1, e_vx2), (vx1, vx2)),
+        ('vz', (e_vz1, e_vz2), (vz1, vz2)),
+        ('θ',  (e_th1, e_th2), (theta1, theta2)),
+        ('ω',  (e_om1, e_om2), (omega1, omega2)),
+        ('I_L',(e_IL1, e_IL2), (IL1, IL2)),
+        ('I_R',(e_IR1, e_IR2), (IR1, IR2)),
+        ('τ',  (e_tau1, e_tau2), (tau1, tau2)),
+    ]
+
+    fig, axes = plt.subplots(9, 2, figsize=(14, 20))
+
+    for i, (name, (err1, err2), (val1, val2)) in enumerate(params):
+        ax_err = axes[i, 0]
+        ax_val = axes[i, 1]
+        ax_err.plot(t1, err1, label=label_pd, alpha=0.9)
+        ax_err.plot(t2, err2, label=label_bs, alpha=0.9)
+        ax_err.set_ylabel(f'e_{name}')
+        ax_err.legend(); ax_err.grid(True)
+
+        ax_val.plot(t1, val1, label=label_pd, alpha=0.9)
+        ax_val.plot(t2, val2, label=label_bs, alpha=0.9)
+        ax_val.set_ylabel(name)
+        ax_val.legend(); ax_val.grid(True)
+
+        if i == 0:
+            ax_err.set_title('Ошибки')
+            ax_val.set_title('Величины')
+
+    axes[-1, 0].set_xlabel('Время, с')
+    axes[-1, 1].set_xlabel('Время, с')
+    fig.tight_layout()
+
+>>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
     if save_path:
         fig.savefig(save_path, dpi=120)
     if show:
         plt.show()
     else:
+<<<<<<< HEAD
         plt.close(fig)
 
 
@@ -488,3 +622,6 @@ def plot_lyapunov_certificate(data, save_path=None, show=True):
         plt.show()
     else:
         plt.close(fig)
+=======
+        plt.close(fig)
+>>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
