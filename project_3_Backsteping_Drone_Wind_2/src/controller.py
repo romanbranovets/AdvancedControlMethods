@@ -181,7 +181,6 @@ class BacksteppingVelocityController:
 
         # внутренние переменные
         self._I_des_prev = np.array([0.0, 0.0], dtype=float)
-<<<<<<< HEAD
         self._T_des_prev = 0.0
         self._theta_des_prev = 0.0
         self._omega_des_prev = 0.0
@@ -194,8 +193,6 @@ class BacksteppingVelocityController:
             self._I_des_prev = np.array([0.0, 0.0], dtype=float)
         else:
             self._I_des_prev = np.asarray(I_hover, dtype=float).reshape(2).copy()
-=======
->>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
         self._T_des_prev = self.m * self.g
         self._theta_des_prev = 0.0
         self._omega_des_prev = 0.0
@@ -219,6 +216,8 @@ class BacksteppingVelocityController:
         self._T_des = 0.0
         self._tau_des = 0.0
         self._I_des = np.array([0.0, 0.0], dtype=float)
+        self.last_lyapunov = None
+        self.last_lyapunov_terms = None
 
     def update(self, v_des, v, a, tau, I, dt, theta, omega):
         """
@@ -274,7 +273,7 @@ class BacksteppingVelocityController:
 
         # --- Lyapunov-like certificate (quadratic in tracking errors) ---
         e_I = I - I_des
-        e_om = omega_des - omega_hat
+        e_om = omega_des - omega
         c_th = self.m * self.g * 0.08
         c_I = self.k_I * self.tau_m
         V_vel = 0.5 * self.m * float(np.dot(e_v, e_v))
@@ -340,7 +339,6 @@ class _VelocityMotorCascadeBase:
         self._I_des = np.array([0.0, 0.0], dtype=float)
 
     def reset(self, I_hover=None):
-<<<<<<< HEAD
         self._theta_hat_prev = 0.0
         self._reset_extra()
 
@@ -349,12 +347,6 @@ class _VelocityMotorCascadeBase:
 
     def _accel_des(self, v_des, v, a, dt):
         raise NotImplementedError
-=======
-        self._theta_des = 0.0
-        self._tau_des = 0.0
-        self._T_des = 0.0
-        self._I_des = np.array([0.0, 0.0], dtype=float)
->>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
 
     def update(self, v_des, v, a, tau, I, dt, theta, omega):
         """
@@ -368,18 +360,12 @@ class _VelocityMotorCascadeBase:
         if dt <= 0.0:
             return np.clip(np.asarray(I, dtype=float).reshape(2), self.I_min, self.I_max)
 
-<<<<<<< HEAD
         az_p = float(a[1] + self.g)
         theta_hat = float(np.arctan2(a[0], np.sign(az_p) * max(abs(az_p), 1e-3)))
         omega_hat = (theta_hat - self._theta_hat_prev) / dt
         self._theta_hat_prev = theta_hat
 
         a_des = self._accel_des(v_des, v, a, dt)
-=======
-        # Внешний контур по скорости
-        e_v = v_des - v
-        a_des = self.kv * e_v
->>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
         an = float(np.linalg.norm(a_des))
         if an > self.a_lim and an > 0:
             a_des = a_des * (self.a_lim / an)
@@ -387,7 +373,6 @@ class _VelocityMotorCascadeBase:
         T_des, theta_des = _allocate_thrust_pitch(self.m, self.g, a_des[0], a_des[1], self.theta_lim)
         T_des = float(np.clip(T_des, 1e-3, 2.0 * self.k_F * self.I_max ** 2))
 
-<<<<<<< HEAD
         e_th = theta_des - theta_hat
         tau_des = self.J * (self.k_th * e_th - self.k_w * omega_hat)
         tau_max = self.L_arm * self.k_F * self.I_max ** 2
@@ -443,30 +428,3 @@ class PIDVelocityMotorController(_VelocityMotorCascadeBase):
         self._int_e += e * dt
         self._int_e = np.clip(self._int_e, -self.integral_limit, self.integral_limit)
         return self.kp * e - self.kd * a + self.ki * self._int_e
-=======
-        # Контур тангажа (используем измеренные theta, omega)
-        e_th = theta_des - theta
-        tau_des = self.J * (self.k_th * e_th - self.k_w * omega)
-        tau_des = float(np.clip(tau_des, -self.L_arm * self.k_F * self.I_max ** 2,
-                                self.L_arm * self.k_F * self.I_max ** 2))
-
-        I_cmd = _inverse_motors(T_des, tau_des, self.L_arm, self.k_F, self.I_min, self.I_max)
-        I_cmd = np.clip(I_cmd, self.I_min, self.I_max)
-
-        # сохраняем желаемые значения
-        self._theta_des = theta_des
-        self._tau_des = tau_des
-        self._T_des = T_des
-        self._I_des = I_cmd.copy()  # команда – это желаемый ток без динамики мотора
-
-        return I_cmd
-
-    def get_desired(self):
-        return {
-            'theta_des': self._theta_des,
-            'omega_des': 0.0,      # PD-контроллер не вычисляет явно желаемую угловую скорость
-            'T_des': self._T_des,
-            'tau_des': self._tau_des,
-            'I_des': self._I_des.copy()
-        }
->>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb

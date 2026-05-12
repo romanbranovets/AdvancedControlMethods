@@ -9,16 +9,12 @@ from src.controller import (
     PIDVelocityMotorController,
 )
 from src.simulation import run_simulation_2d
-<<<<<<< HEAD
 from src.plots import (
     plot_results_2d,
     plot_velocity_controllers_comparison,
     plot_overshoot_comparison,
     plot_lyapunov_certificate,
 )
-=======
-from src.plots import plot_results_2d_extended, plot_compare_2d_extended
->>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
 from src.visualization import visualize_2d_drone
 from src.plotly_dashboard import build_dashboard_2d
 
@@ -104,7 +100,6 @@ if __name__ == "__main__":
         ("Backstepping", ctrl_bs),
     ]
 
-<<<<<<< HEAD
     datasets = []
     labels = []
     for name, ctrl in controllers:
@@ -135,21 +130,6 @@ if __name__ == "__main__":
     build_dashboard_2d(datasets[1], datasets[3], label_pd='PD', label_bs='Backstepping',
                        save_path='dashboard_2d.html')
     print("  -> open dashboard_2d.html in a browser")
-=======
-    # Расширенные графики для одного контроллера (Backstepping)
-    plot_results_2d_extended(data_bs, save_path='results_2d_bs_ext.png', show=False)
-    print("Saved: results_2d_bs_ext.png")
-
-    # Сравнение двух контроллеров по всем параметрам
-    plot_compare_2d_extended(data_pd, data_bs,
-                             label_pd='PD+inv', label_bs='Backstepping',
-                             save_path='compare_2d_ext.png', show=False)
-    print("Saved: compare_2d_ext.png")
-
-    # Интерактивная панель и анимация (без изменений)
-    build_dashboard_2d(data_pd, data_bs, save_path='dashboard_2d.html')
-    print("Saved: dashboard_2d.html")
->>>>>>> 6d9e6e43feea65ef680f761bfaefad7378ce5ebb
 
     print("Creating 2D animation (Backstepping)...")
     visualize_2d_drone(datasets[3], L_body=0.34, target_fps=22,
