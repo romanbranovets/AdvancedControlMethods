@@ -373,10 +373,10 @@ Then
 $$
 \begin{aligned}
 \dot V_z
-&= e_{z1}(e_{z2}-k_{z1}e_{z1})
- + e_{z2}(-e_{z1}-k_{z2}e_{z2}+a_s e_{z3})
- + e_{z3}(-a_s e_{z2}-k_{z3}e_{z3}) \\
-&= -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2.
+={}& e_{z1}(e_{z2}-k_{z1}e_{z1}) \\
+&+ e_{z2}(-e_{z1}-k_{z2}e_{z2}+a_s e_{z3}) \\
+&+ e_{z3}(-a_s e_{z2}-k_{z3}e_{z3}) \\
+={}& -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2.
 \end{aligned}
 $$
 
@@ -415,12 +415,12 @@ Substitute them into $\dot V_x$:
 $$
 \begin{aligned}
 \dot V_x
-=& e_{x1}(e_{x2}-k_{x1}e_{x1})
- + e_{x2}(-e_{x1}-k_{x2}e_{x2}+g e_{x3}) \\
-&+ e_{x3}(-g e_{x2}-k_{x3}e_{x3}+e_{x4})
- + e_{x4}(-e_{x3}-k_{x4}e_{x4}+a_d e_{x5}) \\
+={}& e_{x1}(e_{x2}-k_{x1}e_{x1}) \\
+&+ e_{x2}(-e_{x1}-k_{x2}e_{x2}+g e_{x3}) \\
+&+ e_{x3}(-g e_{x2}-k_{x3}e_{x3}+e_{x4}) \\
+&+ e_{x4}(-e_{x3}-k_{x4}e_{x4}+a_d e_{x5}) \\
 &+ e_{x5}(-a_d e_{x4}-k_{x5}e_{x5}) \\
-=& -k_{x1}e_{x1}^2 - k_{x2}e_{x2}^2 - k_{x3}e_{x3}^2 - k_{x4}e_{x4}^2 - k_{x5}e_{x5}^2.
+={}& -k_{x1}e_{x1}^2 - k_{x2}e_{x2}^2 - k_{x3}e_{x3}^2 - k_{x4}e_{x4}^2 - k_{x5}e_{x5}^2.
 \end{aligned}
 $$
 
@@ -483,9 +483,20 @@ $$
 
 Thus, the drone reaches the desired point and stabilizes at hover.
 
+# 6. Numerical Simulation Setup
+TODO
+# 7. Baseline Controllers
+TODO
+# 8. Experimental Results
+TODO
+# 9. Discussion and Limitations
+TODO
+# 10. Reproducibility
+TODO
+# 11. Repository Layout
+TODO
 
-
---- OLD:
+# OLD
 
 ## 1. Problem Definition
 
