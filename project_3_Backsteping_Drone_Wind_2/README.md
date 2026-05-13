@@ -18,7 +18,7 @@ The main goal is to show that accounting for actuator dynamics through backstepp
 Consider a wind-free planar drone moving in the vertical plane $(x, z)$. The goal is to stabilize the drone at the desired point
 
 $$
-x \to x^*, \qquad z \to z^* ,
+x \to x^{\ast}, \qquad z \to z^{\ast},
 $$
 
 with zero velocity and zero pitch angle:
@@ -97,14 +97,14 @@ $$
 X =
 \begin{bmatrix}
 x & z & v_x & v_z & \theta & \omega & i_s & i_d
-\end{bmatrix}^T.
+\end{bmatrix}^{T}.
 $$
 
 The model is
 
 $$
 \begin{aligned}
-\dot x &= v_x, & \dot v_x &= g\theta, & \dot \theta &= \omega, & \dot \omega &= a_d i_d, 
+\dot x &= v_x, & \dot v_x &= g\theta, & \dot \theta &= \omega, & \dot \omega &= a_d i_d, \\
 \tau_m \dot i_d &= -i_d + u_d, & \dot z &= v_z, & \dot v_z &= a_s i_s, & \tau_m \dot i_s &= -i_s + u_s.
 \end{aligned}
 $$
@@ -182,7 +182,7 @@ At every step, we introduce a new error variable and add its squared value to th
 Define the vertical position error:
 
 $$
-e_{z1} = z - z^*.
+e_{z1} = z - z^{\ast}.
 $$
 
 Choose the virtual desired vertical velocity:
@@ -246,7 +246,7 @@ $$
 Define the horizontal position error:
 
 $$
-e_{x1} = x - x^*.
+e_{x1} = x - x^{\ast}.
 $$
 
 Choose the virtual desired horizontal velocity:
@@ -362,8 +362,8 @@ Substitute the closed-loop error dynamics:
 
 $$
 \begin{aligned}
-\dot e_{z1} &= e_{z2} - k_{z1}e_{z1}, 
-\dot e_{z2} &= -e_{z1} - k_{z2}e_{z2} + a_s e_{z3}, 
+\dot e_{z1} &= e_{z2} - k_{z1}e_{z1}, \\
+\dot e_{z2} &= -e_{z1} - k_{z2}e_{z2} + a_s e_{z3}, \\
 \dot e_{z3} &= -a_s e_{z2} - k_{z3}e_{z3}.
 \end{aligned}
 $$
@@ -374,9 +374,8 @@ $$
 \begin{aligned}
 \dot V_z
 &= e_{z1}(e_{z2}-k_{z1}e_{z1})
-
-- e_{z2}(-e_{z1}-k_{z2}e_{z2}+a_s e_{z3})
-- e_{z3}(-a_s e_{z2}-k_{z3}e_{z3}) 
+ + e_{z2}(-e_{z1}-k_{z2}e_{z2}+a_s e_{z3})
+ + e_{z3}(-a_s e_{z2}-k_{z3}e_{z3}) \\
 &= -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2.
 \end{aligned}
 $$
@@ -403,10 +402,10 @@ The closed-loop horizontal error dynamics are
 
 $$
 \begin{aligned}
-\dot e_{x1} &= e_{x2} - k_{x1}e_{x1}, 
-\dot e_{x2} &= -e_{x1} - k_{x2}e_{x2} + g e_{x3}, 
-\dot e_{x3} &= -g e_{x2} - k_{x3}e_{x3} + e_{x4}, 
-\dot e_{x4} &= -e_{x3} - k_{x4}e_{x4} + a_d e_{x5}, 
+\dot e_{x1} &= e_{x2} - k_{x1}e_{x1}, \\
+\dot e_{x2} &= -e_{x1} - k_{x2}e_{x2} + g e_{x3}, \\
+\dot e_{x3} &= -g e_{x2} - k_{x3}e_{x3} + e_{x4}, \\
+\dot e_{x4} &= -e_{x3} - k_{x4}e_{x4} + a_d e_{x5}, \\
 \dot e_{x5} &= -a_d e_{x4} - k_{x5}e_{x5}.
 \end{aligned}
 $$
@@ -417,11 +416,10 @@ $$
 \begin{aligned}
 \dot V_x
 =& e_{x1}(e_{x2}-k_{x1}e_{x1})
-
-- e_{x2}(-e_{x1}-k_{x2}e_{x2}+g e_{x3}) 
+ + e_{x2}(-e_{x1}-k_{x2}e_{x2}+g e_{x3}) \\
 &+ e_{x3}(-g e_{x2}-k_{x3}e_{x3}+e_{x4})
-- e_{x4}(-e_{x3}-k_{x4}e_{x4}+a_d e_{x5}) 
-&+ e_{x5}(-a_d e_{x4}-k_{x5}e_{x5}) 
+ + e_{x4}(-e_{x3}-k_{x4}e_{x4}+a_d e_{x5}) \\
+&+ e_{x5}(-a_d e_{x4}-k_{x5}e_{x5}) \\
 =& -k_{x1}e_{x1}^2 - k_{x2}e_{x2}^2 - k_{x3}e_{x3}^2 - k_{x4}e_{x4}^2 - k_{x5}e_{x5}^2.
 \end{aligned}
 $$
@@ -443,7 +441,7 @@ This gives
 $$
 \begin{aligned}
 V
-=& \frac{1}{2}e_{z1}^2 + \frac{1}{2}e_{z2}^2 + \frac{1}{2}e_{z3}^2 
+=& \frac{1}{2}e_{z1}^2 + \frac{1}{2}e_{z2}^2 + \frac{1}{2}e_{z3}^2 \\
 &+ \frac{1}{2}e_{x1}^2 + \frac{1}{2}e_{x2}^2 + \frac{1}{2}e_{x3}^2 + \frac{1}{2}e_{x4}^2 + \frac{1}{2}e_{x5}^2.
 \end{aligned}
 $$
@@ -459,7 +457,7 @@ Therefore,
 $$
 \begin{aligned}
 \dot V
-=& -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2 
+=& -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2 \\
 &- k_{x1}e_{x1}^2 - k_{x2}e_{x2}^2 - k_{x3}e_{x3}^2 - k_{x4}e_{x4}^2 - k_{x5}e_{x5}^2.
 \end{aligned}
 $$
@@ -474,28 +472,17 @@ $$
 is globally asymptotically stable. This implies
 
 $$
-z \to z^*, \qquad v_z \to 0, \qquad i_s \to 0,
+z \to z^{\ast}, \qquad v_z \to 0, \qquad i_s \to 0,
 $$
 
 and
 
 $$
-x \to x^*, \qquad v_x \to 0, \qquad \theta \to 0, \qquad \omega \to 0, \qquad i_d \to 0.
+x \to x^{\ast}, \qquad v_x \to 0, \qquad \theta \to 0, \qquad \omega \to 0, \qquad i_d \to 0.
 $$
 
 Thus, the drone reaches the desired point and stabilizes at hover.
 
-# 6. Numerical Simulation Setup
-TODO
-# 7. Baseline Controllers
-TODO
-# 8. Experimental Results
-TODO
-# 9. Discussion and Limitations
-TODO
-# 10. Reproducibility
-TODO
-# 11. Repository Layout
 
 
 --- OLD:
@@ -504,7 +491,7 @@ TODO
 
 ### 1.1 Control objective
 
-The drone starts from an initial point `p(0)` and must reach a fixed target point `p`*:
+The drone starts from an initial point `p(0)` and must reach a fixed target point `p*`:
 
 ```text
 p  = [x, z]^T
