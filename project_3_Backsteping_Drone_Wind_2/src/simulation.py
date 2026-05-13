@@ -1,15 +1,13 @@
 # src/simulation.py
 import numpy as np
-
 from src.system import VerticalDrone, PlanarDrone2D
+from src.controller import BacksteppingVelocityController
 
 
-def rk4_step(system, state, t, dt, u, wind_func):
-    """Один шаг RK4 для системы с методом dynamics(state, t, u, wind_func)."""
-
+def rk4_step(system, state, t, dt, u):
+    """Один шаг RK4 для системы с методом dynamics(state, t, u)."""
     def f(s, tt):
-        return system.dynamics(s, tt, u, wind_func)
-
+        return system.dynamics(s, tt, u)
     k1 = f(state, t)
     k2 = f(state + 0.5 * dt * k1, t + 0.5 * dt)
     k3 = f(state + 0.5 * dt * k2, t + 0.5 * dt)
@@ -17,72 +15,41 @@ def rk4_step(system, state, t, dt, u, wind_func):
     return state + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
 
-def run_simulation(system: VerticalDrone,
-                   controller,
-                   wind_func,
-                   initial_state,
-                   target_z: float,
-                   t_max=15.0,
-                   dt=0.005,
-                   stop_tolerance=0.05,
-                   verbose=True):
-    """
-    Запуск симуляции до достижения целевой высоты с заданной точностью.
-
-    Возвращает словарь:
-        't':        массив времени
-        'states':   массив состояний (N, 3)
-        'controls': массив управлений (N,)
-        'target':   float z_des
-        'winds':    массив сил ветра (N,)
-    """
+def run_simulation(system: VerticalDrone, controller, initial_state, target_z,
+                   t_max=15.0, dt=0.005, stop_tolerance=0.05, verbose=True):
+    """1D симуляция (без ветра)."""
     t = 0.0
     state = initial_state.astype(float).copy()
     controller.reset()
-
-    times, states, controls, winds = [], [], [], []
-
+    times, states, controls = [], [], []
     n_steps = int(np.ceil(t_max / dt))
-    u = 0.0
-
     for _ in range(n_steps):
-        w = wind_func(t) if wind_func else 0.0
         u = controller.update(state, target_z, dt)
-
-        state = rk4_step(system, state, t, dt, u, wind_func)
+        state = rk4_step(system, state, t, dt, u)
         t += dt
-
         times.append(t)
         states.append(state.copy())
         controls.append(u)
-        winds.append(w)
-
         if not np.all(np.isfinite(state)):
             if verbose:
                 print(f"[sim] non-finite state at t={t:.2f}s — aborting.")
             break
-
-        error = abs(state[0] - target_z)
-        if error < stop_tolerance:
+        if abs(state[0] - target_z) < stop_tolerance:
             if verbose:
-                print(f"[sim] target reached at t={t:.2f}s, error={error:.4f}m")
+                print(f"[sim] target reached at t={t:.2f}s")
             break
-
     return {
-        't':        np.array(times),
-        'states':   np.array(states),
+        't': np.array(times),
+        'states': np.array(states),
         'controls': np.array(controls),
-        'winds':    np.array(winds),
-        'target':   target_z,
+        'target': target_z,
     }
 
 
 def run_simulation_2d(
     system: PlanarDrone2D,
     controller,
-    wind_func,
     initial_state,
-    v_des,
     target_pos=None,
     t_max=20.0,
     dt=0.005,
@@ -95,117 +62,124 @@ def run_simulation_2d(
     v_max=1.4,
 ):
     """
-    Planar drone simulation. Controller: update(v_des, v, a, tau, I, dt) -> I_cmd (2,).
-
-    State: [x, z, vx, vz, theta, omega, I_L, I_R]
-
-    If target_pos is set, the simulator adds an outer position loop:
-        v_ref = sat(pos_gain * (target_pos - [x, z]), v_max)
-    so the existing velocity controllers drive the drone to a fixed point.
-
-    If early_stop is True, stops when the active tracking error stays below tolerance.
-    Records Lyapunov certificate from controller.last_lyapunov when present.
+    Planar drone simulation. Для BacksteppingVelocityController используется
+    внутренний позиционный контур, для остальных – внешний (передаётся v_ref).
     """
     t = 0.0
     state = np.asarray(initial_state, dtype=float).copy().reshape(8)
-    v_des = np.asarray(v_des, dtype=float).reshape(2)
     target_pos = None if target_pos is None else np.asarray(target_pos, dtype=float).reshape(2)
     I_hover = PlanarDrone2D.hover_currents(system.m, system.g, system.k_F)
     if hasattr(controller, 'reset'):
         controller.reset(I_hover=I_hover)
 
-    times, states, controls, winds, taus, accels = [], [], [], [], [], []
+    times, states, controls, taus, accels = [], [], [], [], []
     v_refs = []
     lyap_V = []
     lyap_terms_rows = []
+    desired_records = []   # для желаемых величин Backstepping
 
     n_steps = int(np.ceil(t_max / dt))
-    u = I_hover.copy()
     good = 0
+
+    # Определяем, является ли контроллер Backstepping
+    is_backstepping = isinstance(controller, BacksteppingVelocityController)
 
     for _ in range(n_steps):
         x, z, vx, vz, theta, omega, I_L, I_R = state
-        if target_pos is None:
-            v_ref = v_des.copy()
-        else:
-            pos_error = target_pos - np.array([x, z], dtype=float)
-            v_ref = pos_gain * pos_error
-            v_norm = float(np.linalg.norm(v_ref))
-            if v_norm > v_max and v_norm > 0.0:
-                v_ref *= v_max / v_norm
-
         T, tau = system.thrust_torque(I_L, I_R)
+
+        # Вычисляем ускорение из динамики (без ветра)
         st, ct = np.sin(theta), np.cos(theta)
         ax = (T * st) / system.m - (system.c_d / system.m) * vx
         az = (T * ct - system.m * system.g) / system.m - (system.c_d / system.m) * vz
-        a_vec = np.array([ax, az], dtype=float)
-
-        if wind_func is not None:
-            wpack = np.asarray(wind_func(t), dtype=float).reshape(-1)
-            wx, wz = float(wpack[0]), float(wpack[1])
-            w_tau = float(wpack[2]) if wpack.size >= 3 else 0.0
-        else:
-            wx = wz = w_tau = 0.0
-        ax += wx / system.m
-        az += wz / system.m
-
         a_meas = np.array([ax, az], dtype=float)
 
-        u = controller.update(v_ref, np.array([vx, vz]), a_meas, tau, np.array([I_L, I_R]), dt, theta, omega)
-
-        lv = getattr(controller, 'last_lyapunov', None)
-        lyap_V.append(np.nan if lv is None else float(lv))
-        lt = getattr(controller, 'last_lyapunov_terms', None)
-        if lt is None:
-            lyap_terms_rows.append(
-                {'V_vel': np.nan, 'V_pitch': np.nan, 'V_omega': np.nan, 'V_current': np.nan})
+        if is_backstepping:
+            # Для Backstepping передаём целевую позицию, состояние, ускорение, момент
+            u = controller.update(state, target_pos, a_meas, tau, dt)
+            # Сохраняем желаемые величины
+            desired = controller.get_desired()
+            desired_records.append(desired)
+            # Для критерия остановки используем позиционную ошибку
+            if target_pos is not None:
+                ep = np.linalg.norm(state[0:2] - target_pos)
+                is_good = ep < pos_tol and np.linalg.norm(state[2:4]) < vel_tol
+            else:
+                # если target_pos нет, используем v_ref (но в этом режиме Backstepping не используется)
+                is_good = False
         else:
-            lyap_terms_rows.append({k: float(lt[k]) for k in ('V_vel', 'V_pitch', 'V_omega', 'V_current')})
+            # Для остальных контроллеров – внешний позиционный контур
+            if target_pos is None:
+                v_ref = np.zeros(2, dtype=float)
+            else:
+                pos_error = target_pos - np.array([x, z])
+                v_ref = pos_gain * pos_error
+                v_norm = float(np.linalg.norm(v_ref))
+                if v_norm > v_max and v_norm > 0.0:
+                    v_ref *= v_max / v_norm
+            u = controller.update(v_ref, np.array([vx, vz]), a_meas, tau, np.array([I_L, I_R]), dt, theta, omega)
+            v_refs.append(v_ref.copy())
+            # Критерий остановки
+            ev = np.linalg.norm(state[2:4] - v_ref)
+            ep = np.inf if target_pos is None else np.linalg.norm(state[0:2] - target_pos)
+            is_good = ev < vel_tol if target_pos is None else (ep < pos_tol and np.linalg.norm(state[2:4]) < vel_tol)
 
-        state = rk4_step(system, state, t, dt, u, wind_func)
+        # Шаг интегрирования
+        state = rk4_step(system, state, t, dt, u)
         t += dt
 
         times.append(t)
         states.append(state.copy())
         controls.append(u.copy())
-        winds.append(np.array([wx, wz, w_tau], dtype=float))
         taus.append(tau)
         accels.append(a_meas.copy())
-        v_refs.append(v_ref.copy())
+
+        # Lyapunov для Backstepping
+        lv = getattr(controller, 'last_lyapunov', None)
+        lyap_V.append(np.nan if lv is None else float(lv))
+        lt = getattr(controller, 'last_lyapunov_terms', None)
+        if lt is None:
+            lyap_terms_rows.append({'V_vel': np.nan, 'V_pitch': np.nan, 'V_omega': np.nan, 'V_current': np.nan})
+        else:
+            lyap_terms_rows.append({k: float(lt[k]) for k in ('V_vel', 'V_pitch', 'V_omega', 'V_current')})
 
         if not np.all(np.isfinite(state)):
             if verbose:
                 print(f"[sim2d] non-finite state at t={t:.2f}s — aborting.")
             break
 
-        if early_stop:
-            ev = np.linalg.norm(state[2:4] - v_ref)
-            ep = np.inf if target_pos is None else np.linalg.norm(state[0:2] - target_pos)
-            is_good = ev < vel_tol if target_pos is None else (ep < pos_tol and np.linalg.norm(state[2:4]) < vel_tol)
-            if is_good:
-                good += 1
-            else:
-                good = 0
-            if good >= hold_steps:
-                if verbose:
-                    if target_pos is None:
-                        print(f"[sim2d] velocity target held at t={t:.2f}s, |e_v|={ev:.4f}")
-                    else:
-                        print(f"[sim2d] target point reached at t={t:.2f}s, |e_p|={ep:.4f} m")
-                break
+        if early_stop and is_good:
+            good += 1
+        else:
+            good = 0
+        if good >= hold_steps:
+            if verbose:
+                if target_pos is not None:
+                    print(f"[sim2d] target point reached at t={t:.2f}s")
+                else:
+                    print(f"[sim2d] velocity target held at t={t:.2f}s")
+            break
 
-    keys = ('V_vel', 'V_pitch', 'V_omega', 'V_current')
-    lyap_terms = {k: np.array([row[k] for row in lyap_terms_rows], dtype=float) for k in keys}
+    lyap_terms = {k: np.array([row[k] for row in lyap_terms_rows], dtype=float)
+                  for k in ('V_vel', 'V_pitch', 'V_omega', 'V_current')}
 
-    return {
+    result = {
         't': np.array(times),
         'states': np.array(states),
         'controls': np.array(controls),
-        'winds': np.array(winds),
         'taus': np.array(taus),
         'accels': np.array(accels),
-        'v_des': np.array(v_refs),
+        'v_des': np.array(v_refs) if not is_backstepping else None,
         'target_pos': None if target_pos is None else target_pos.copy(),
         'lyapunov': np.array(lyap_V, dtype=float),
         'lyapunov_terms': lyap_terms,
     }
+
+    if is_backstepping and desired_records:
+        # Преобразуем список словарей в словарь массивов
+        desired_arrays = {}
+        for key in desired_records[0].keys():
+            desired_arrays[key] = np.array([rec[key] for rec in desired_records])
+        result['desired'] = desired_arrays
+
+    return result

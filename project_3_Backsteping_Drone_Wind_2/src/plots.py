@@ -4,14 +4,17 @@ import matplotlib.pyplot as plt
 
 
 def _velocity_reference(data):
-    v_des = np.asarray(data['v_des'], dtype=float)
+    """Извлекает желаемую скорость из данных (для не-Backstepping)."""
+    v_des = data.get('v_des')
+    if v_des is not None:
+        return v_des
+    # fallback
     n = len(data['t'])
-    if v_des.ndim == 1:
-        return np.tile(v_des.reshape(1, 2), (n, 1))
-    return v_des
+    return np.zeros((n, 2))
 
 
 def _position_error(data):
+    """Евклидова ошибка позиции, если есть target_pos."""
     target = data.get('target_pos')
     if target is None:
         return None
@@ -20,6 +23,7 @@ def _position_error(data):
 
 
 def _overshoot_along_path(data):
+    """Превышение пути вдоль линии от старта до цели."""
     target = data.get('target_pos')
     if target is None:
         return None
@@ -35,12 +39,175 @@ def _overshoot_along_path(data):
     return np.maximum(progress - path_len, 0.0)
 
 
+# ----------------------------------------------------------------------
+# Новая функция: два столбца (переменные и ошибки)
+# ----------------------------------------------------------------------
+def plot_results_2d_with_errors(data, save_path=None, show=True):
+    """
+    2D результаты: левая колонка – переменные, правая – их ошибки.
+    Для Backstepping используются желаемые значения из data['desired'].
+    """
+    t = data['t']
+    s = data['states']
+    target_pos = data.get('target_pos')
+    desired = data.get('desired', {})
+
+    x, z = s[:, 0], s[:, 1]
+    vx, vz = s[:, 2], s[:, 3]
+    theta = s[:, 4]          # rad
+    omega = s[:, 5]
+    I_L, I_R = s[:, 6], s[:, 7]
+    tau = data['taus']
+
+    # Наличие желаемых величин
+    has_desired = ('v_des' in desired) and ('theta_des' in desired)
+
+    fig, axes = plt.subplots(6, 2, figsize=(14, 18))  # 6 строк, 2 колонки
+
+    # ---- Строка 1: позиция ----
+    ax = axes[0, 0]
+    ax.plot(t, x, label='x')
+    ax.plot(t, z, label='z')
+    if target_pos is not None:
+        ax.axhline(target_pos[0], color='r', linestyle='--', alpha=0.5, label='x target')
+        ax.axhline(target_pos[1], color='g', linestyle='--', alpha=0.5, label='z target')
+    ax.set_ylabel('Position [m]')
+    ax.legend(loc='best')
+    ax.grid(True)
+
+    ax = axes[0, 1]
+    if target_pos is not None:
+        err_x = x - target_pos[0]
+        err_z = z - target_pos[1]
+        ax.plot(t, err_x, label='err x')
+        ax.plot(t, err_z, label='err z')
+        ax.set_ylabel('Position error [m]')
+        ax.legend(loc='best')
+    else:
+        ax.text(0.5, 0.5, 'No target position', ha='center', va='center')
+    ax.grid(True)
+
+    # ---- Строка 2: скорость ----
+    ax = axes[1, 0]
+    ax.plot(t, vx, label='vx')
+    ax.plot(t, vz, label='vz')
+    if has_desired:
+        ax.plot(t, desired['v_des'][:, 0], 'k--', alpha=0.5, label='vx des')
+        ax.plot(t, desired['v_des'][:, 1], 'k:', alpha=0.5, label='vz des')
+    ax.set_ylabel('Velocity [m/s]')
+    ax.legend(loc='best')
+    ax.grid(True)
+
+    ax = axes[1, 1]
+    if has_desired:
+        err_vx = vx - desired['v_des'][:, 0]
+        err_vz = vz - desired['v_des'][:, 1]
+        ax.plot(t, err_vx, label='err vx')
+        ax.plot(t, err_vz, label='err vz')
+        ax.set_ylabel('Velocity error [m/s]')
+        ax.legend(loc='best')
+    else:
+        ax.text(0.5, 0.5, 'No desired velocity', ha='center', va='center')
+    ax.grid(True)
+
+    # ---- Строка 3: тангаж (угол) ----
+    ax = axes[2, 0]
+    ax.plot(t, np.rad2deg(theta), label='theta (deg)')
+    if has_desired:
+        ax.plot(t, np.rad2deg(desired['theta_des']), 'r--', alpha=0.5, label='theta des')
+    ax.set_ylabel('Pitch [deg]')
+    ax.legend(loc='best')
+    ax.grid(True)
+
+    ax = axes[2, 1]
+    if has_desired:
+        err_theta = np.rad2deg(theta - desired['theta_des'])
+        ax.plot(t, err_theta, label='err theta')
+        ax.set_ylabel('Pitch error [deg]')
+        ax.legend(loc='best')
+    else:
+        ax.text(0.5, 0.5, 'No desired pitch', ha='center', va='center')
+    ax.grid(True)
+
+    # ---- Строка 4: угловая скорость ----
+    ax = axes[3, 0]
+    ax.plot(t, omega, label='omega')
+    if has_desired:
+        ax.plot(t, desired['omega_des'], 'r--', alpha=0.5, label='omega des')
+    ax.set_ylabel('Angular velocity [rad/s]')
+    ax.legend(loc='best')
+    ax.grid(True)
+
+    ax = axes[3, 1]
+    if has_desired:
+        err_omega = omega - desired['omega_des']
+        ax.plot(t, err_omega, label='err omega')
+        ax.set_ylabel('Angular vel error [rad/s]')
+        ax.legend(loc='best')
+    else:
+        ax.text(0.5, 0.5, 'No desired omega', ha='center', va='center')
+    ax.grid(True)
+
+    # ---- Строка 5: токи двигателей ----
+    ax = axes[4, 0]
+    ax.plot(t, I_L, label='I_L')
+    ax.plot(t, I_R, label='I_R')
+    if has_desired:
+        ax.plot(t, desired['I_des'][:, 0], 'k--', alpha=0.5, label='I_L des')
+        ax.plot(t, desired['I_des'][:, 1], 'k:', alpha=0.5, label='I_R des')
+    ax.set_ylabel('Currents [A]')
+    ax.legend(loc='best')
+    ax.grid(True)
+
+    ax = axes[4, 1]
+    if has_desired:
+        err_IL = I_L - desired['I_des'][:, 0]
+        err_IR = I_R - desired['I_des'][:, 1]
+        ax.plot(t, err_IL, label='err I_L')
+        ax.plot(t, err_IR, label='err I_R')
+        ax.set_ylabel('Current error [A]')
+        ax.legend(loc='best')
+    else:
+        ax.text(0.5, 0.5, 'No desired currents', ha='center', va='center')
+    ax.grid(True)
+
+    # ---- Строка 6: момент тангажа ----
+    ax = axes[5, 0]
+    ax.plot(t, tau, label='tau')
+    if has_desired and 'tau_des' in desired:
+        ax.plot(t, desired['tau_des'], 'r--', alpha=0.5, label='tau des')
+    ax.set_ylabel('Torque [N·m]')
+    ax.legend(loc='best')
+    ax.grid(True)
+
+    ax = axes[5, 1]
+    if has_desired and 'tau_des' in desired:
+        err_tau = tau - desired['tau_des']
+        ax.plot(t, err_tau, label='err tau')
+        ax.set_ylabel('Torque error [N·m]')
+        ax.legend(loc='best')
+    else:
+        ax.text(0.5, 0.5, 'No desired torque', ha='center', va='center')
+    ax.grid(True)
+
+    fig.suptitle(f'2D simulation results with errors (t_end = {t[-1]:.2f} s)')
+    fig.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=120)
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+# ----------------------------------------------------------------------
+# Существующие функции (адаптированы для совместимости, без ветра)
+# ----------------------------------------------------------------------
 def plot_results(data, save_path=None, show=True):
     """Single-run 1D height plots."""
     t = data['t']
     s = data['states']
     u = data['controls']
-    w = data['winds']
     target = data['target']
 
     z = s[:, 0]
@@ -76,9 +243,9 @@ def plot_results(data, save_path=None, show=True):
     ax.grid(True)
 
     ax = axes[2, 0]
-    ax.plot(t, w, label='wind force')
-    ax.set_title('Disturbance force [N]')
-    ax.legend()
+    # ранее был ветер, теперь просто пустой или убираем
+    ax.text(0.5, 0.5, 'No wind', ha='center', va='center')
+    ax.set_title('Disturbance (wind removed)')
     ax.grid(True)
 
     ax = axes[2, 1]
@@ -246,7 +413,7 @@ def plot_results_2d(data, save_path=None, show=True):
 
 def plot_compare_2d(data_a, data_b, label_a='P', label_b='Backstepping',
                     save_path=None, show=True):
-    """Compare two 2D runs (legacy two-way)."""
+    """Compare two 2D runs."""
     t1, t2 = data_a['t'], data_b['t']
     ep1 = _position_error(data_a)
     ep2 = _position_error(data_b)
@@ -310,12 +477,7 @@ def plot_compare_2d(data_a, data_b, label_a='P', label_b='Backstepping',
 
 
 def plot_velocity_controllers_comparison(datasets, labels, save_path=None, show=True):
-    """
-    Compare multiple 2D controllers (P, PD, PID, Backstepping, ...).
-
-    datasets: list of dicts from run_simulation_2d.
-    labels: list of str, same length.
-    """
+    """Compare multiple 2D controllers (P, PD, PID, Backstepping, ...)."""
     if len(datasets) != len(labels):
         raise ValueError('datasets and labels must have the same length')
 
@@ -444,8 +606,7 @@ def plot_overshoot_comparison(datasets, labels, save_path=None, show=True):
 def plot_lyapunov_certificate(data, save_path=None, show=True):
     """
     Lyapunov stability certificate for Backstepping run: composite V(t), terms, numeric dV/dt.
-
-    Expects keys 't', 'lyapunov', 'lyapunov_terms' from run_simulation_2d.
+    Expects keys 't', 'lyapunov', 'lyapunov_terms'.
     """
     t = np.asarray(data['t'], dtype=float)
     V = np.asarray(data['lyapunov'], dtype=float)
