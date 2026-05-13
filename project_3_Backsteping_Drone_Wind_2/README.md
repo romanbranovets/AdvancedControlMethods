@@ -484,17 +484,145 @@ $$
 Thus, the drone reaches the desired point and stabilizes at hover.
 
 # 6. Numerical Simulation Setup
-TODO
+
+The numerical study compares four controllers under the same initial condition, target point, and integration settings. The simulation uses a fixed-step RK4 scheme with time step
+
+$$
+\Delta t = 0.004 \text{ s},
+$$
+
+and a total horizon of
+
+$$
+T_{\max} = 18 \text{ s}.
+$$
+
+The initial state is
+
+$$
+[x(0), z(0), v_x(0), v_z(0), \theta(0), \omega(0), I_L(0), I_R(0)]^T,
+$$
+
+where the position is randomized as
+
+$$
+x(0) \in [-0.5, 0.5], \qquad z(0) \in [2, 5],
+$$
+
+with seed `7`, and the initial velocities, pitch angle, and pitch rate are zero. The target point is fixed at
+
+$$
+p^\ast = [6.0, 4.0]^T.
+$$
+
+The main physical parameters used in simulation are:
+
+$$
+m = 0.5 \text{ kg}, \qquad g = 9.81 \text{ m/s}^2, \qquad J = 0.014 \text{ kg m}^2,
+$$
+
+$$
+L = 0.18 \text{ m}, \qquad k_F = 0.38, \qquad \tau_m = 0.07 \text{ s}.
+$$
+
+The current bounds are
+
+$$
+I_{\min} = 0, \qquad I_{\max} = 16 \text{ A}.
+$$
+
+To make the comparison fair, early stopping is disabled and all controllers are evaluated on the same fixed horizon.
+
 # 7. Baseline Controllers
-TODO
+
+The project compares the proposed backstepping controller with three standard baselines: P, PD, and PID. All three baselines use the same outer position-to-velocity structure and the same thrust-pitch allocation and motor inversion logic, so the main difference is in the velocity regulation law.
+
+The **P** controller uses only proportional feedback on the velocity error:
+
+$$
+a_{des} = k_p (v_{des} - v).
+$$
+
+The **PD** controller adds derivative damping:
+
+$$
+a_{des} = k_p (v_{des} - v) - k_d a.
+$$
+
+The **PID** controller additionally integrates the velocity error:
+
+$$
+a_{des} = k_p (v_{des} - v) - k_d a + k_i \int (v_{des} - v)\,dt,
+$$
+
+with integral clamping to avoid windup.
+
+The **Backstepping** controller explicitly handles the cascade from position to velocity, pitch, angular rate, and motor currents. It is therefore the only controller in the comparison that directly accounts for actuator dynamics in its design.
+
 # 8. Experimental Results
-TODO
+
+The results show a clear advantage of backstepping in target tracking accuracy. In the controller comparison plot, the backstepping trajectory converges to the target with the smallest final position error, while the classical P/PD/PID controllers exhibit larger transient deviations.
+
+The overshoot comparison confirms that backstepping approaches the target more smoothly. Because overshoot is measured along the line from the initial point to the target, this plot is especially informative for showing whether a controller passes beyond the goal with excessive momentum.
+
+The detailed backstepping diagnostics indicate that the controller keeps pitch, angular rate, and motor currents bounded while still reducing the tracking error. The Lyapunov-style certificate is also useful as a qualitative stability diagnostic: the composite function decreases over time in the nominal run, which is consistent with the stability mechanism of the backstepping design.
+
 # 9. Discussion and Limitations
-TODO
+
+The main strength of the proposed controller is that it treats the motor-current dynamics as part of the control design rather than as an ignored actuator lag. This makes the closed-loop behavior more consistent with the physical plant and improves tracking under the same actuator constraints.
+
+At the same time, the implementation still relies on a simplified planar model. It does not capture full 3D motion, strong aerodynamic nonlinearities, or highly uncertain wind fields. The outer-loop saturation and pitch limits are also important: they improve robustness, but they can reduce performance when the target is far away or the initial error is large.
+
+The Lyapunov function used in the code is best interpreted as a diagnostic certificate for the simulated backstepping run, not as a complete proof for the full saturated nonlinear cascade. Even so, it is valuable because it visualizes how the weighted tracking errors evolve together.
+
 # 10. Reproducibility
-TODO
+
+To reproduce the results, install the dependencies and run the main script:
+
+```bash
+uv sync
+uv run python main.py
+```
+
+The script generates the comparison plots, the overshoot figure, the backstepping diagnostic plot, the Lyapunov certificate, the animated GIF, and the interactive Plotly dashboard. The exact filenames used by the current code are:
+
+| File | Description |
+|------|-------------|
+| `controllers_comparison.png` | controller comparison |
+| `overshoot_comparison.png` | overshoot comparison |
+| `results_2d_backstepping_with_errors.png` | detailed backstepping signals |
+| `lyapunov_certificate.png` | Lyapunov-style certificate |
+| `drone_2d.gif` | animation |
+| `dashboard_2d.html` | interactive Plotly dashboard |
+
+The experiment is deterministic because the random seed is fixed to `7`.
+
 # 11. Repository Layout
-TODO
+
+The repository is organized as follows:
+
+```text
+project_3_Backsteping_Drone_Wind_2/
+├── README.md
+├── main.py
+├── pyproject.toml
+├── uv.lock
+├── src/
+│   ├── system.py
+│   ├── controller.py
+│   ├── simulation.py
+│   ├── plots.py
+│   ├── visualization.py
+│   └── plotly_dashboard.py
+├── controllers_comparison.png
+├── overshoot_comparison.png
+├── results_2d_backstepping_with_errors.png
+├── lyapunov_certificate.png
+├── drone_2d.gif
+└── dashboard_2d.html
+```
+
+The code is split into a plant model, controller implementations, simulation routines, plotting utilities, visualization tools, and an interactive dashboard module. This separation makes it easier to extend the project with new controllers or alternative plant models.
 
 # OLD
 
