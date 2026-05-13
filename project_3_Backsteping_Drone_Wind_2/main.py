@@ -10,21 +10,13 @@ from src.controller import (
 )
 from src.simulation import run_simulation_2d
 from src.plots import (
-    plot_results_2d,
+    plot_results_2d_with_errors,
     plot_velocity_controllers_comparison,
     plot_overshoot_comparison,
     plot_lyapunov_certificate,
 )
 from src.visualization import visualize_2d_drone
 from src.plotly_dashboard import build_dashboard_2d
-
-
-def wind_field_2d(t):
-    """Wind forces [N] and small external pitch torque [N·m]."""
-    wx = 0.12 * np.sin(0.85 * t) + 0.05
-    wz = 0.08 * np.cos(1.1 * t)
-    w_tau = 0.008 * np.sin(2.2 * t)
-    return np.array([wx, wz, w_tau], dtype=float)
 
 
 if __name__ == "__main__":
@@ -48,9 +40,7 @@ if __name__ == "__main__":
     initial_state = np.array([x0, z0, 0.0, 0.0, 0.0, 0.0, I0[0], I0[1]], dtype=float)
 
     target_pos = np.array([6.0, 4.0], dtype=float)
-    v_des = np.zeros(2, dtype=float)
 
-    # Same horizon for fair comparison (no early stop).
     sim_kwargs = dict(
         t_max=18.0,
         dt=0.004,
@@ -83,15 +73,13 @@ if __name__ == "__main__":
     )
     ctrl_bs = BacksteppingVelocityController(
         m=m, g=g, J=J, L_arm=L_arm, k_F=k_F, tau_m=tau_m,
-        kv=2.4, k_theta=5.0, k_omega=4.0, k_I=14.0, k_tau_blend=0.12,
+        pos_kp=0.8, pos_kd=0.4, vel_kp=2.4, v_max=1.5,
+        k_theta=5.0, k_omega=4.0, k_I=14.0, k_tau_blend=0.12,
         a_lim=5.5, theta_lim=0.42, I_min=I_min, I_max=I_max,
     )
 
     print("2D planar drone - target-point tracking (P / PD / PID / Backstepping)")
-    print(
-        f"  start (x,z)=({x0:.2f}, {z0:.2f}) m, "
-        f"target=({target_pos[0]:.2f}, {target_pos[1]:.2f}) m"
-    )
+    print(f"  start (x,z)=({x0:.2f}, {z0:.2f}) m, target=({target_pos[0]:.2f}, {target_pos[1]:.2f}) m")
 
     controllers = [
         ("P", ctrl_p),
@@ -105,8 +93,7 @@ if __name__ == "__main__":
     for name, ctrl in controllers:
         print(f"  running {name} ...")
         d = run_simulation_2d(
-            system, ctrl, wind_field_2d,
-            initial_state.copy(), v_des, **sim_kwargs,
+            system, ctrl, initial_state.copy(), **sim_kwargs,
         )
         epf = np.linalg.norm(d['states'][-1, 0:2] - target_pos)
         print(f"    final ||p-p*|| = {epf:.4f} m, t_end = {d['t'][-1]:.2f} s")
@@ -119,14 +106,14 @@ if __name__ == "__main__":
     plot_overshoot_comparison(
         datasets, labels, save_path='overshoot_comparison.png', show=False,
     )
-    plot_results_2d(datasets[-1], save_path='results_2d_backstepping.png', show=False)
+    # Новая функция с ошибками для Backstepping
+    plot_results_2d_with_errors(datasets[-1], save_path='results_2d_backstepping_with_errors.png', show=False)
     plot_lyapunov_certificate(datasets[-1], save_path='lyapunov_certificate.png', show=False)
     print(
         "Saved: controllers_comparison.png, overshoot_comparison.png, "
-        "results_2d_backstepping.png, lyapunov_certificate.png"
+        "results_2d_backstepping_with_errors.png, lyapunov_certificate.png"
     )
 
-    # Plotly: compare PD vs Backstepping trajectories (representative linear controllers vs BS)
     build_dashboard_2d(datasets[1], datasets[3], label_pd='PD', label_bs='Backstepping',
                        save_path='dashboard_2d.html')
     print("  -> open dashboard_2d.html in a browser")
