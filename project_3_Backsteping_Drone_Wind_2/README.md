@@ -11,6 +11,8 @@ The project compares four controllers under the same conditions:
 
 The main goal is to show that accounting for actuator dynamics through backstepping improves target tracking and provides a meaningful stability certificate.
 
+![Backstepping flight animation](drone_2d.gif)
+
 ---
 
 # 1. Problem Statement
@@ -555,11 +557,37 @@ The **Backstepping** controller explicitly handles the cascade from position to 
 
 # 8. Experimental Results
 
+## 8.1 Controller comparison
+
+![Controller comparison](controllers_comparison.png)
+
+**Figure 1 — Controller comparison.**
+
 The results show a clear advantage of backstepping in target tracking accuracy. In the controller comparison plot, the backstepping trajectory converges to the target with the smallest final position error, while the classical P/PD/PID controllers exhibit larger transient deviations.
+
+## 8.2 Overshoot comparison
+
+![Overshoot comparison](overshoot_comparison.png)
+
+**Figure 2 — Overshoot comparison.**
 
 The overshoot comparison confirms that backstepping approaches the target more smoothly. Because overshoot is measured along the line from the initial point to the target, this plot is especially informative for showing whether a controller passes beyond the goal with excessive momentum.
 
-The detailed backstepping diagnostics indicate that the controller keeps pitch, angular rate, and motor currents bounded while still reducing the tracking error. The Lyapunov-style certificate is also useful as a qualitative stability diagnostic: the composite function decreases over time in the nominal run, which is consistent with the stability mechanism of the backstepping design.
+## 8.3 Detailed backstepping run
+
+![Backstepping diagnostics](results_2d_backstepping_with_errors.png)
+
+**Figure 3 — Backstepping diagnostic plots.**
+
+The detailed backstepping diagnostics indicate that the controller keeps pitch, angular rate, and motor currents bounded while still reducing the tracking error.
+
+## 8.4 Lyapunov certificate
+
+![Lyapunov certificate](lyapunov_certificate.png)
+
+**Figure 4 — Lyapunov certificate for Backstepping.**
+
+The Lyapunov-style certificate is useful as a qualitative stability diagnostic: the composite function decreases over time in the nominal run, which is consistent with the stability mechanism of the backstepping design.
 
 # 9. Discussion and Limitations
 
