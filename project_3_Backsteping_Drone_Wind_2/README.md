@@ -1,6 +1,6 @@
-# Backstepping Control of a Planar Drone Under Wind (2D)
+# Backstepping Control of a Planar Drone (2D)
 
-This project studies **target-point regulation** of a planar drone moving in the vertical `x-z` plane. The model has **two motors**, **quadratic thrust-current relation**, **first-order motor current dynamics**, and external **wind force / pitch torque** disturbances.
+This project studies **target-point regulation** of a planar drone moving in the vertical `x-z` plane. The model has **two motors**, **quadratic thrust-current relation**, **first-order motor current dynamics**
 
 The project compares four controllers under the same conditions:
 
