@@ -525,12 +525,6 @@ $$
 L = 0.18 \text{ m}, \qquad k_F = 0.38, \qquad \tau_m = 0.07 \text{ s}.
 $$
 
-The current bounds are
-
-$$
-I_{\min} = 0, \qquad I_{\max} = 16 \text{ A}.
-$$
-
 To make the comparison fair, early stopping is disabled and all controllers are evaluated on the same fixed horizon.
 
 # 7. Baseline Controllers
