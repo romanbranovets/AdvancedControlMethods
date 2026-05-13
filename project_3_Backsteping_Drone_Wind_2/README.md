@@ -13,11 +13,498 @@ The main goal is to show that accounting for actuator dynamics through backstepp
 
 ---
 
+# 1. Problem Statement
+
+Consider a wind-free planar drone moving in the vertical plane $(x, z)$. The goal is to stabilize the drone at the desired point
+
+$$
+x \to x^*, \qquad z \to z^* ,
+$$
+
+with zero velocity and zero pitch angle:
+
+$$
+v_x \to 0, \qquad v_z \to 0, \qquad \theta \to 0, \qquad \omega \to 0.
+$$
+
+Unlike a simple model where the thrust or acceleration can be commanded directly, we want to design the controller **down to the motor-current level**. Therefore, the real control inputs are not accelerations or thrusts, but motor current commands.
+
+Let
+
+$$
+I_0 = \sqrt{\frac{mg}{2k_F}}
+$$
+
+be the hover current of each motor. We introduce current deviations from hover:
+
+$$
+i_L = I_L - I_0, \qquad i_R = I_R - I_0.
+$$
+
+Instead of working directly with left and right current deviations, we use collective and differential coordinates:
+
+$$
+i_s = i_L + i_R, \qquad i_d = i_R - i_L.
+$$
+
+Here:
+
+- $i_s$ controls the vertical thrust deviation;
+- $i_d$ controls the pitch torque.
+
+The corresponding control inputs are collective and differential current commands:
+
+$$
+u_s = u_L + u_R, \qquad u_d = u_R - u_L,
+$$
+
+where
+
+$$
+u_L = I_{L,cmd} - I_0, \qquad u_R = I_{R,cmd} - I_0.
+$$
+
+The physical motor commands can be recovered as
+
+$$
+I_{L,cmd} = I_0 + \frac{u_s - u_d}{2}, \qquad
+I_{R,cmd} = I_0 + \frac{u_s + u_d}{2}.
+$$
+
+The objective is to construct a backstepping controller for $u_s$ and $u_d$ and prove global asymptotic stability of the origin of the error dynamics.
+
+---
+
+# 2. Transformation to State-Space Form
+
+We use the hover-linearized planar drone model. Around hover, the thrust-current relation is linearized as
+
+$$
+T_k = k_F I_k^2 \approx k_F I_0^2 + 2k_F I_0 i_k.
+$$
+
+Since
+
+$$
+2k_F I_0^2 = mg,
+$$
+
+the hover thrust compensates gravity, and the remaining vertical acceleration is controlled by $i_s$.
+
+The state vector is
+
+$$
+X =
+\begin{bmatrix}
+x & z & v_x & v_z & \theta & \omega & i_s & i_d
+\end{bmatrix}^T.
+$$
+
+The model is
+
+$$
+\begin{aligned}
+\dot x &= v_x, & \dot v_x &= g\theta, & \dot \theta &= \omega, & \dot \omega &= a_d i_d, 
+\tau_m \dot i_d &= -i_d + u_d, & \dot z &= v_z, & \dot v_z &= a_s i_s, & \tau_m \dot i_s &= -i_s + u_s.
+\end{aligned}
+$$
+
+The constants are
+
+$$
+a_s = \frac{2k_F I_0}{m}, \qquad a_d = \frac{2Lk_F I_0}{J},
+$$
+
+where:
+
+- $m$ is the drone mass;
+- $J$ is the pitch moment of inertia;
+- $L$ is the arm length;
+- $k_F$ is the thrust coefficient;
+- $\tau_m$ is the motor current time constant.
+
+The system naturally splits into two strict-feedback chains.
+
+Vertical chain:
+
+$$
+u_s \rightarrow i_s \rightarrow v_z \rightarrow z.
+$$
+
+Horizontal chain:
+
+$$
+u_d \rightarrow i_d \rightarrow \omega \rightarrow \theta \rightarrow v_x \rightarrow x.
+$$
+
+This structure is exactly what makes backstepping suitable.
+
+---
+
+# 3. Idea of Backstepping
+
+The key idea of backstepping is to stabilize the system recursively.
+
+For the vertical motion, we do not directly control $z$. Instead, the chain is:
+
+$$
+u_s \to i_s \to v_z \to z.
+$$
+
+So we proceed step by step:
+
+1. Choose a desired vertical velocity to stabilize $z$.
+2. Choose a desired collective current $i_s$ to stabilize $v_z$.
+3. Choose the actual current command $u_s$ to make $i_s$ track its desired value.
+
+For the horizontal motion, the chain is longer:
+
+$$
+u_d \to i_d \to \omega \to \theta \to v_x \to x.
+$$
+
+So we recursively define:
+
+1. desired horizontal velocity;
+2. desired pitch angle;
+3. desired pitch rate;
+4. desired differential current;
+5. actual differential current command.
+
+At every step, we introduce a new error variable and add its squared value to the Lyapunov function. The control law is chosen so that the derivative of the Lyapunov function becomes negative definite.
+
+---
+
+# 4. Choice of Control Law
+
+## 4.1. Vertical channel
+
+Define the vertical position error:
+
+$$
+e_{z1} = z - z^*.
+$$
+
+Choose the virtual desired vertical velocity:
+
+$$
+\alpha_{z1} = -k_{z1}e_{z1}.
+$$
+
+Define the vertical velocity error:
+
+$$
+e_{z2} = v_z - \alpha_{z1}.
+$$
+
+Since $\dot z = v_z$, we have
+
+$$
+\dot e_{z1} = v_z = e_{z2} + \alpha_{z1} = e_{z2} - k_{z1}e_{z1}.
+$$
+
+Now choose the desired collective current:
+
+$$
+\alpha_{z2} = \frac{\dot\alpha_{z1} - e_{z1} - k_{z2}e_{z2}}{a_s}.
+$$
+
+Define the collective current tracking error:
+
+$$
+e_{z3} = i_s - \alpha_{z2}.
+$$
+
+Since $\dot v_z = a_s i_s$, we get
+
+$$
+\dot e_{z2} = a_s i_s - \dot\alpha_{z1}.
+$$
+
+Substituting $i_s = e_{z3} + \alpha_{z2}$, we obtain
+
+$$
+\dot e_{z2} = -e_{z1} - k_{z2}e_{z2} + a_s e_{z3}.
+$$
+
+Finally, using the motor current dynamics $\tau_m\dot i_s = -i_s + u_s$, we choose the real collective current command:
+
+$$
+u_s = i_s + \tau_m\left(\dot\alpha_{z2} - a_s e_{z2} - k_{z3}e_{z3}\right).
+$$
+
+Then
+
+$$
+\dot e_{z3} = -a_s e_{z2} - k_{z3}e_{z3}.
+$$
+
+---
+
+## 4.2. Horizontal channel
+
+Define the horizontal position error:
+
+$$
+e_{x1} = x - x^*.
+$$
+
+Choose the virtual desired horizontal velocity:
+
+$$
+\alpha_{x1} = -k_{x1}e_{x1}.
+$$
+
+Define
+
+$$
+e_{x2} = v_x - \alpha_{x1}.
+$$
+
+Then
+
+$$
+\dot e_{x1} = e_{x2} - k_{x1}e_{x1}.
+$$
+
+Since $\dot v_x = g\theta$, choose the desired pitch angle:
+
+$$
+\alpha_{x2} = \frac{\dot\alpha_{x1} - e_{x1} - k_{x2}e_{x2}}{g}.
+$$
+
+Define the pitch angle error:
+
+$$
+e_{x3} = \theta - \alpha_{x2}.
+$$
+
+Then
+
+$$
+\dot e_{x2} = -e_{x1} - k_{x2}e_{x2} + g e_{x3}.
+$$
+
+Now choose the desired pitch rate:
+
+$$
+\alpha_{x3} = \dot\alpha_{x2} - g e_{x2} - k_{x3}e_{x3}.
+$$
+
+Define
+
+$$
+e_{x4} = \omega - \alpha_{x3}.
+$$
+
+Since $\dot\theta = \omega$, we obtain
+
+$$
+\dot e_{x3} = -g e_{x2} - k_{x3}e_{x3} + e_{x4}.
+$$
+
+Next, since $\dot\omega = a_d i_d$, choose the desired differential current:
+
+$$
+\alpha_{x4} = \frac{\dot\alpha_{x3} - e_{x3} - k_{x4}e_{x4}}{a_d}.
+$$
+
+Define the differential current tracking error:
+
+$$
+e_{x5} = i_d - \alpha_{x4}.
+$$
+
+Then
+
+$$
+\dot e_{x4} = -e_{x3} - k_{x4}e_{x4} + a_d e_{x5}.
+$$
+
+Finally, using $\tau_m\dot i_d = -i_d + u_d$, choose the actual differential current command:
+
+$$
+u_d = i_d + \tau_m\left(\dot\alpha_{x4} - a_d e_{x4} - k_{x5}e_{x5}\right).
+$$
+
+Then
+
+$$
+\dot e_{x5} = -a_d e_{x4} - k_{x5}e_{x5}.
+$$
+
+All gains are assumed positive:
+
+$$
+k_{z1}, k_{z2}, k_{z3} > 0, \qquad
+k_{x1}, k_{x2}, k_{x3}, k_{x4}, k_{x5} > 0.
+$$
+
+---
+
+# 5. Global Stability Proof
+
+## 5.1. Vertical channel proof
+
+Consider the vertical Lyapunov function:
+
+$$
+V_z = \frac{1}{2}e_{z1}^2 + \frac{1}{2}e_{z2}^2 + \frac{1}{2}e_{z3}^2.
+$$
+
+Its derivative is
+
+$$
+\dot V_z = e_{z1}\dot e_{z1} + e_{z2}\dot e_{z2} + e_{z3}\dot e_{z3}.
+$$
+
+Substitute the closed-loop error dynamics:
+
+$$
+\begin{aligned}
+\dot e_{z1} &= e_{z2} - k_{z1}e_{z1}, 
+\dot e_{z2} &= -e_{z1} - k_{z2}e_{z2} + a_s e_{z3}, 
+\dot e_{z3} &= -a_s e_{z2} - k_{z3}e_{z3}.
+\end{aligned}
+$$
+
+Then
+
+$$
+\begin{aligned}
+\dot V_z
+&= e_{z1}(e_{z2}-k_{z1}e_{z1})
+
+- e_{z2}(-e_{z1}-k_{z2}e_{z2}+a_s e_{z3})
+- e_{z3}(-a_s e_{z2}-k_{z3}e_{z3}) 
+&= -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2.
+\end{aligned}
+$$
+
+Therefore, $\dot V_z < 0$ for all nonzero vertical error states. Thus, the vertical subsystem is globally asymptotically stable.
+
+---
+
+## 5.2. Horizontal channel proof
+
+Consider the horizontal Lyapunov function:
+
+$$
+V_x = \frac{1}{2}e_{x1}^2 + \frac{1}{2}e_{x2}^2 + \frac{1}{2}e_{x3}^2 + \frac{1}{2}e_{x4}^2 + \frac{1}{2}e_{x5}^2.
+$$
+
+Its derivative is
+
+$$
+\dot V_x = \sum_{j=1}^{5} e_{xj}\dot e_{xj}.
+$$
+
+The closed-loop horizontal error dynamics are
+
+$$
+\begin{aligned}
+\dot e_{x1} &= e_{x2} - k_{x1}e_{x1}, 
+\dot e_{x2} &= -e_{x1} - k_{x2}e_{x2} + g e_{x3}, 
+\dot e_{x3} &= -g e_{x2} - k_{x3}e_{x3} + e_{x4}, 
+\dot e_{x4} &= -e_{x3} - k_{x4}e_{x4} + a_d e_{x5}, 
+\dot e_{x5} &= -a_d e_{x4} - k_{x5}e_{x5}.
+\end{aligned}
+$$
+
+Substitute them into $\dot V_x$:
+
+$$
+\begin{aligned}
+\dot V_x
+=& e_{x1}(e_{x2}-k_{x1}e_{x1})
+
+- e_{x2}(-e_{x1}-k_{x2}e_{x2}+g e_{x3}) 
+&+ e_{x3}(-g e_{x2}-k_{x3}e_{x3}+e_{x4})
+- e_{x4}(-e_{x3}-k_{x4}e_{x4}+a_d e_{x5}) 
+&+ e_{x5}(-a_d e_{x4}-k_{x5}e_{x5}) 
+=& -k_{x1}e_{x1}^2 - k_{x2}e_{x2}^2 - k_{x3}e_{x3}^2 - k_{x4}e_{x4}^2 - k_{x5}e_{x5}^2.
+\end{aligned}
+$$
+
+Therefore, $\dot V_x < 0$ for all nonzero horizontal error states. Thus, the horizontal subsystem is globally asymptotically stable.
+
+---
+
+## 5.3. Full Lyapunov function
+
+Now define the full Lyapunov function:
+
+$$
+V = V_x + V_z.
+$$
+
+This gives
+
+$$
+\begin{aligned}
+V
+=& \frac{1}{2}e_{z1}^2 + \frac{1}{2}e_{z2}^2 + \frac{1}{2}e_{z3}^2 
+&+ \frac{1}{2}e_{x1}^2 + \frac{1}{2}e_{x2}^2 + \frac{1}{2}e_{x3}^2 + \frac{1}{2}e_{x4}^2 + \frac{1}{2}e_{x5}^2.
+\end{aligned}
+$$
+
+This function is positive definite and radially unbounded. Its derivative is
+
+$$
+\dot V = \dot V_z + \dot V_x.
+$$
+
+Therefore,
+
+$$
+\begin{aligned}
+\dot V
+=& -k_{z1}e_{z1}^2 - k_{z2}e_{z2}^2 - k_{z3}e_{z3}^2 
+&- k_{x1}e_{x1}^2 - k_{x2}e_{x2}^2 - k_{x3}e_{x3}^2 - k_{x4}e_{x4}^2 - k_{x5}e_{x5}^2.
+\end{aligned}
+$$
+
+Since all gains are positive, $\dot V < 0$ for all nonzero error vectors. Therefore, the equilibrium
+
+$$
+e_{z1}=e_{z2}=e_{z3}=0, \qquad
+e_{x1}=e_{x2}=e_{x3}=e_{x4}=e_{x5}=0
+$$
+
+is globally asymptotically stable. This implies
+
+$$
+z \to z^*, \qquad v_z \to 0, \qquad i_s \to 0,
+$$
+
+and
+
+$$
+x \to x^*, \qquad v_x \to 0, \qquad \theta \to 0, \qquad \omega \to 0, \qquad i_d \to 0.
+$$
+
+Thus, the drone reaches the desired point and stabilizes at hover.
+
+# 6. Numerical Simulation Setup
+TODO
+# 7. Baseline Controllers
+TODO
+# 8. Experimental Results
+TODO
+# 9. Discussion and Limitations
+TODO
+# 10. Reproducibility
+TODO
+# 11. Repository Layout
+
+
+--- OLD:
+
 ## 1. Problem Definition
 
 ### 1.1 Control objective
 
-The drone starts from an initial point `p(0)` and must reach a fixed target point `p*`:
+The drone starts from an initial point `p(0)` and must reach a fixed target point `p`*:
 
 ```text
 p  = [x, z]^T
@@ -26,12 +513,14 @@ p* = [x*, z*]^T
 
 where:
 
-| Symbol | Meaning |
-|--------|---------|
-| `x` | horizontal position, m |
-| `z` | vertical position, m |
-| `p` | current position vector |
-| `p*` | desired target position |
+
+| Symbol | Meaning                 |
+| ------ | ----------------------- |
+| `x`    | horizontal position, m  |
+| `z`    | vertical position, m    |
+| `p`    | current position vector |
+| `p*`   | desired target position |
+
 
 The control objective is:
 
@@ -52,13 +541,15 @@ In simulation, all controllers are compared on a fixed time horizon, so the fina
 
 The project evaluates:
 
-| Metric | Meaning |
-|--------|---------|
-| `||p - p*||` | Euclidean distance to the target |
-| `IAE` | integral absolute position error |
-| `overshoot` | how far the drone passes beyond the target along the start-target line |
-| motor current | how aggressively the controller uses actuators |
-| Lyapunov certificate | diagnostic stability evidence for backstepping |
+
+| Metric               | Meaning                                                                |
+| -------------------- | ---------------------------------------------------------------------- |
+| `                    |                                                                        |
+| `IAE`                | integral absolute position error                                       |
+| `overshoot`          | how far the drone passes beyond the target along the start-target line |
+| motor current        | how aggressively the controller uses actuators                         |
+| Lyapunov certificate | diagnostic stability evidence for backstepping                         |
+
 
 Integral absolute error:
 
@@ -78,9 +569,7 @@ uv run python main.py
 
 ### 2.1 Controller comparison
 
-<p align="center">
-  <img src="controllers_comparison.png" alt="Controller comparison" width="900">
-</p>
+
 
 **Figure 1 — Controller comparison.**
 
@@ -95,9 +584,7 @@ The key observation is that **Backstepping reaches the target with the smallest 
 
 ### 2.2 Overshoot comparison
 
-<p align="center">
-  <img src="overshoot_comparison.png" alt="Overshoot comparison" width="900">
-</p>
+
 
 **Figure 2 — Overshoot comparison.**
 
@@ -110,9 +597,7 @@ This plot shows whether a controller approaches the target smoothly or passes th
 
 ### 2.3 Detailed backstepping run
 
-<p align="center">
-  <img src="results_2d_backstepping.png" alt="Backstepping detailed result" width="900">
-</p>
+
 
 **Figure 3 — Backstepping diagnostic plots.**
 
@@ -129,9 +614,7 @@ This figure is useful for checking that convergence is achieved without unreason
 
 ### 2.4 Lyapunov certificate
 
-<p align="center">
-  <img src="lyapunov_certificate.png" alt="Lyapunov certificate" width="900">
-</p>
+
 
 **Figure 4 — Lyapunov certificate for Backstepping.**
 
@@ -145,9 +628,7 @@ The derivative is computed numerically, so it should be interpreted as a diagnos
 
 ### 2.5 Animation
 
-<p align="center">
-  <img src="drone_2d.gif" alt="2D drone animation" width="900">
-</p>
+
 
 **Figure 5 — Backstepping flight animation.**
 
@@ -171,16 +652,18 @@ state = [x, z, v_x, v_z, theta, omega, I_L, I_R]^T
 
 where:
 
-| Variable | Unit | Meaning |
-|----------|------|---------|
-| `x` | m | horizontal position |
-| `z` | m | vertical position |
-| `v_x` | m/s | horizontal velocity |
-| `v_z` | m/s | vertical velocity |
-| `theta` | rad | pitch angle |
-| `omega` | rad/s | pitch rate |
-| `I_L` | A | left motor current |
-| `I_R` | A | right motor current |
+
+| Variable | Unit  | Meaning             |
+| -------- | ----- | ------------------- |
+| `x`      | m     | horizontal position |
+| `z`      | m     | vertical position   |
+| `v_x`    | m/s   | horizontal velocity |
+| `v_z`    | m/s   | vertical velocity   |
+| `theta`  | rad   | pitch angle         |
+| `omega`  | rad/s | pitch rate          |
+| `I_L`    | A     | left motor current  |
+| `I_R`    | A     | right motor current |
+
 
 ### 3.2 Motor thrust and torque
 
@@ -200,13 +683,15 @@ tau = L * k_F * (I_R^2 - I_L^2)
 
 where:
 
-| Symbol | Meaning |
-|--------|---------|
+
+| Symbol       | Meaning                     |
+| ------------ | --------------------------- |
 | `T_L`, `T_R` | left and right motor thrust |
-| `T` | total thrust |
-| `tau` | pitch torque |
-| `L` | effective motor arm |
-| `k_F` | thrust coefficient |
+| `T`          | total thrust                |
+| `tau`        | pitch torque                |
+| `L`          | effective motor arm         |
+| `k_F`        | thrust coefficient          |
+
 
 ### 3.3 Translational and rotational dynamics
 
@@ -227,14 +712,16 @@ d(z)/dt = v_z
 
 where:
 
-| Symbol | Meaning |
-|--------|---------|
-| `m` | drone mass |
-| `g` | gravitational acceleration |
-| `J` | pitch moment of inertia |
-| `c_d` | linear drag coefficient |
-| `w_x`, `w_z` | wind force components |
-| `w_tau` | external wind-induced pitch torque |
+
+| Symbol       | Meaning                            |
+| ------------ | ---------------------------------- |
+| `m`          | drone mass                         |
+| `g`          | gravitational acceleration         |
+| `J`          | pitch moment of inertia            |
+| `c_d`        | linear drag coefficient            |
+| `w_x`, `w_z` | wind force components              |
+| `w_tau`      | external wind-induced pitch torque |
+
 
 ### 3.4 Motor-current dynamics
 
@@ -246,11 +733,13 @@ d(I_k)/dt = (I_k_cmd - I_k) / tau_m,       k ∈ {L, R}
 
 where:
 
-| Symbol | Meaning |
-|--------|---------|
-| `I_k` | actual motor current |
-| `I_k_cmd` | commanded motor current |
-| `tau_m` | motor-current time constant |
+
+| Symbol    | Meaning                     |
+| --------- | --------------------------- |
+| `I_k`     | actual motor current        |
+| `I_k_cmd` | commanded motor current     |
+| `tau_m`   | motor-current time constant |
+
 
 This actuator lag is the main reason why backstepping is useful: the controller explicitly compensates it.
 
@@ -317,12 +806,14 @@ else:
 
 where:
 
-| Symbol | Meaning |
-|--------|---------|
-| `e_p` | position error |
-| `k_p` | outer position gain |
-| `v_max` | maximum allowed reference speed |
+
+| Symbol  | Meaning                                     |
+| ------- | ------------------------------------------- |
+| `e_p`   | position error                              |
+| `k_p`   | outer position gain                         |
+| `v_max` | maximum allowed reference speed             |
 | `v_ref` | desired velocity passed to inner controller |
+
 
 ---
 
@@ -555,22 +1046,24 @@ If `O(t) > 0`, the drone has passed beyond the target along the initial line of 
 
 ## 8. Numerical Experiment
 
-| Quantity | Value |
-|----------|-------|
-| Target point | `(6.0, 4.0)` m |
-| Outer position gain | `pos_gain = 0.7` |
-| Velocity cap | `v_max = 1.35` m/s |
-| Horizon | `18 s` |
-| RK4 step | `0.004 s` |
-| Initial position | random: `x0 in [-0.5, 0.5]`, `z0 in [2, 5]`, seed `7` |
-| early_stop | `False` for fair fixed-horizon comparison |
-| Mass | `m = 0.5 kg` |
-| Gravity | `g = 9.81 m/s²` |
-| Pitch inertia | `J = 0.014 kg m²` |
-| Arm length | `L = 0.18 m` |
-| Thrust coefficient | `k_F = 0.38 N/A²` |
-| Motor time constant | `tau_m = 0.07 s` |
-| Max current | `I_max = 16 A` |
+
+| Quantity            | Value                                                 |
+| ------------------- | ----------------------------------------------------- |
+| Target point        | `(6.0, 4.0)` m                                        |
+| Outer position gain | `pos_gain = 0.7`                                      |
+| Velocity cap        | `v_max = 1.35` m/s                                    |
+| Horizon             | `18 s`                                                |
+| RK4 step            | `0.004 s`                                             |
+| Initial position    | random: `x0 in [-0.5, 0.5]`, `z0 in [2, 5]`, seed `7` |
+| early_stop          | `False` for fair fixed-horizon comparison             |
+| Mass                | `m = 0.5 kg`                                          |
+| Gravity             | `g = 9.81 m/s²`                                       |
+| Pitch inertia       | `J = 0.014 kg m²`                                     |
+| Arm length          | `L = 0.18 m`                                          |
+| Thrust coefficient  | `k_F = 0.38 N/A²`                                     |
+| Motor time constant | `tau_m = 0.07 s`                                      |
+| Max current         | `I_max = 16 A`                                        |
+
 
 ---
 
@@ -585,14 +1078,16 @@ uv run python main.py
 
 Generated files:
 
-| File | Description |
-|------|-------------|
-| `controllers_comparison.png` | controller comparison |
-| `overshoot_comparison.png` | overshoot comparison |
+
+| File                          | Description                   |
+| ----------------------------- | ----------------------------- |
+| `controllers_comparison.png`  | controller comparison         |
+| `overshoot_comparison.png`    | overshoot comparison          |
 | `results_2d_backstepping.png` | detailed backstepping signals |
-| `lyapunov_certificate.png` | Lyapunov-style certificate |
-| `drone_2d.gif` | animation |
-| `dashboard_2d.html` | interactive Plotly dashboard |
+| `lyapunov_certificate.png`    | Lyapunov-style certificate    |
+| `drone_2d.gif`                | animation                     |
+| `dashboard_2d.html`           | interactive Plotly dashboard  |
+
 
 ---
 
@@ -618,3 +1113,4 @@ project_3_Backsteping_Drone_Wind_2/
 ├── drone_2d.gif
 └── dashboard_2d.html
 ```
+
