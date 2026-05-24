@@ -54,6 +54,7 @@ if __name__ == "__main__":
         v_max=1.35,
     )
 
+    # Общие параметры для каскадных P/PD/PID контроллеров
     k_th, k_w = 9.0, 5.0
     a_lim, th_lim = 6.0, 0.45
     I_min, I_max = 0.0, 16.0
@@ -71,11 +72,13 @@ if __name__ == "__main__":
         a_lim=a_lim, theta_lim=th_lim, I_min=I_min, I_max=I_max,
         integral_limit=3.0,
     )
+
+    # Backstepping контроллер в точности по выводу из README
     ctrl_bs = BacksteppingVelocityController(
         m=m, g=g, J=J, L_arm=L_arm, k_F=k_F, tau_m=tau_m,
-        pos_kp=0.8, pos_kd=0.4, vel_kp=2.4, v_max=1.5,
-        k_theta=5.0, k_omega=4.0, k_I=14.0, k_tau_blend=0.12,
-        a_lim=5.5, theta_lim=0.42, I_min=I_min, I_max=I_max,
+        k_z1=0.8, k_z2=2.0, k_z3=8.0,
+        k_x1=0.8, k_x2=1.5, k_x3=3.0, k_x4=5.0, k_x5=10.0,
+        theta_lim=0.42, I_min=I_min, I_max=I_max,
     )
 
     print("2D planar drone - target-point tracking (P / PD / PID / Backstepping)")
@@ -106,7 +109,7 @@ if __name__ == "__main__":
     plot_overshoot_comparison(
         datasets, labels, save_path='overshoot_comparison.png', show=False,
     )
-    # Новая функция с ошибками для Backstepping
+    # Подробные графики с ошибками для Backstepping
     plot_results_2d_with_errors(datasets[-1], save_path='results_2d_backstepping_with_errors.png', show=False)
     plot_lyapunov_certificate(datasets[-1], save_path='lyapunov_certificate.png', show=False)
     print(
