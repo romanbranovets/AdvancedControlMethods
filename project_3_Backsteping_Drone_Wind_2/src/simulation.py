@@ -69,8 +69,16 @@ def run_simulation_2d(
     state = np.asarray(initial_state, dtype=float).copy().reshape(8)
     target_pos = None if target_pos is None else np.asarray(target_pos, dtype=float).reshape(2)
     I_hover = PlanarDrone2D.hover_currents(system.m, system.g, system.k_F)
-    if hasattr(controller, 'reset'):
-        controller.reset(I_hover=I_hover)
+
+    is_backstepping = isinstance(controller, BacksteppingVelocityController)
+
+    if is_backstepping:
+        # Передаём начальное состояние и целевую позицию, чтобы правильно
+        # инициализировать предыдущие значения виртуальных управлений
+        controller.reset(initial_state=state, target_pos=target_pos)
+    else:
+        if hasattr(controller, 'reset'):
+            controller.reset(I_hover=I_hover)
 
     times, states, controls, taus, accels = [], [], [], [], []
     v_refs = []
@@ -80,9 +88,6 @@ def run_simulation_2d(
 
     n_steps = int(np.ceil(t_max / dt))
     good = 0
-
-    # Определяем, является ли контроллер Backstepping
-    is_backstepping = isinstance(controller, BacksteppingVelocityController)
 
     for _ in range(n_steps):
         x, z, vx, vz, theta, omega, I_L, I_R = state
@@ -105,7 +110,6 @@ def run_simulation_2d(
                 ep = np.linalg.norm(state[0:2] - target_pos)
                 is_good = ep < pos_tol and np.linalg.norm(state[2:4]) < vel_tol
             else:
-                # если target_pos нет, используем v_ref (но в этом режиме Backstepping не используется)
                 is_good = False
         else:
             # Для остальных контроллеров – внешний позиционный контур

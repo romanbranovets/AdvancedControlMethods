@@ -123,36 +123,38 @@ def _inverse_motors(T_des, tau_des, L_arm, k_F, I_min, I_max):
 
 class BacksteppingVelocityController:
     """
-    Backstepping контроллер для планарного дрона.
-    Принимает целевую позицию, текущее состояние (x,z,vx,vz,theta,omega,I_L,I_R),
-    измеренные ускорение и момент.
-    Внутри реализован позиционный контур (PD по позиции -> желаемая скорость,
-    P по скорости -> желаемое ускорение).
+    Backstepping-регулятор для планарного дрона, строго следующий выводу из README.
+
+    Управление строится в отклонениях токов от висения:
+        i_s = i_L + i_R   (коллективное),   i_d = i_R - i_L   (дифференциальное)
+    Команды: u_s, u_d, которые затем переводятся в физические токи моторов.
+
+    Вертикальная цепочка: u_s -> i_s -> v_z -> z
+    Горизонтальная цепочка: u_d -> i_d -> omega -> theta -> v_x -> x
     """
 
     def __init__(
         self,
         m=0.5,
         g=9.81,
-        J=0.015,
+        J=0.014,
         L_arm=0.18,
-        k_F=0.35,
-        tau_m=0.08,
-        # Параметры позиционного контура
-        pos_kp=0.8,
-        pos_kd=0.4,
-        vel_kp=2.4,
-        v_max=1.5,
-        # Параметры контура тангажа
-        k_theta=5.0,
-        k_omega=4.0,
-        k_I=14.0,
-        k_tau_blend=0.12,
-        # Ограничения
-        a_lim=5.5,
-        theta_lim=0.42,
+        k_F=0.38,
+        tau_m=0.07,
+        # коэффициенты вертикального канала
+        k_z1=0.8,
+        k_z2=2.0,
+        k_z3=8.0,
+        # коэффициенты горизонтального канала
+        k_x1=0.8,
+        k_x2=1.5,
+        k_x3=3.0,
+        k_x4=5.0,
+        k_x5=10.0,
+        # ограничения
+        theta_lim=0.42,   # рад
         I_min=0.0,
-        I_max=18.0,
+        I_max=16.0,
     ):
         self.m = float(m)
         self.g = float(g)
@@ -161,61 +163,114 @@ class BacksteppingVelocityController:
         self.k_F = float(k_F)
         self.tau_m = float(tau_m)
 
-        self.pos_kp = float(pos_kp)
-        self.pos_kd = float(pos_kd)
-        self.vel_kp = float(vel_kp)
-        self.v_max = float(v_max)
+        # Ток висения и линеаризованные коэффициенты
+        I0_sq = (m * g) / (2.0 * k_F)
+        self.I0 = float(np.sqrt(max(I0_sq, 0.0)))
+        self.a_s = 2.0 * k_F * self.I0 / m        # вертикальное ускорение / i_s
+        self.a_d = 2.0 * L_arm * k_F * self.I0 / J  # угловое ускорение / i_d
 
-        self.k_theta = float(k_theta)
-        self.k_omega = float(k_omega)
-        self.k_I = float(k_I)
-        self.k_tau_blend = float(k_tau_blend)
+        self.k_z1 = float(k_z1)
+        self.k_z2 = float(k_z2)
+        self.k_z3 = float(k_z3)
 
-        self.a_lim = float(a_lim)
+        self.k_x1 = float(k_x1)
+        self.k_x2 = float(k_x2)
+        self.k_x3 = float(k_x3)
+        self.k_x4 = float(k_x4)
+        self.k_x5 = float(k_x5)
+
         self.theta_lim = float(theta_lim)
         self.I_min = float(I_min)
         self.I_max = float(I_max)
 
-        # внутренние переменные для желаемых величин
-        self._T_des_prev = 0.0
-        self._theta_des_prev = 0.0
-        self._omega_des_prev = 0.0
-        self._I_des_prev = np.array([0.0, 0.0], dtype=float)
+        # память для вычисления производных виртуальных управлений
+        self._alpha_z1_prev = 0.0
+        self._alpha_z2_prev = 0.0
+        self._alpha_x1_prev = 0.0
+        self._alpha_x2_prev = 0.0
+        self._alpha_x3_prev = 0.0
+        self._alpha_x4_prev = 0.0
 
         # желаемые величины для логирования
         self._v_des = np.zeros(2, dtype=float)
-        self._a_des = np.zeros(2, dtype=float)
         self._theta_des = 0.0
         self._omega_des = 0.0
-        self._T_des = 0.0
-        self._tau_des = 0.0
         self._I_des = np.zeros(2, dtype=float)
+        self._tau_des = 0.0
 
         self.last_lyapunov = None
         self.last_lyapunov_terms = None
 
-    def reset(self, I_hover=None):
-        self._T_des_prev = self.m * self.g
-        self._theta_des_prev = 0.0
-        self._omega_des_prev = 0.0
-        self._I_des_prev = np.zeros(2, dtype=float) if I_hover is None else np.asarray(I_hover, dtype=float).copy()
+    def reset(self, initial_state=None, target_pos=None):
+        """
+        Сброс внутреннего состояния контроллера.
+        Если переданы initial_state и target_pos, вычисляются начальные значения
+        виртуальных управлений, чтобы на первом шаге избежать больших скачков
+        производных.
+        """
+        if initial_state is not None and target_pos is not None:
+            self._init_previous_alphas(initial_state, target_pos)
+        else:
+            self._alpha_z1_prev = 0.0
+            self._alpha_z2_prev = 0.0
+            self._alpha_x1_prev = 0.0
+            self._alpha_x2_prev = 0.0
+            self._alpha_x3_prev = 0.0
+            self._alpha_x4_prev = 0.0
+
         self._v_des[:] = 0.0
-        self._a_des[:] = 0.0
         self._theta_des = 0.0
         self._omega_des = 0.0
-        self._T_des = 0.0
-        self._tau_des = 0.0
         self._I_des[:] = 0.0
+        self._tau_des = 0.0
+
         self.last_lyapunov = None
         self.last_lyapunov_terms = None
 
-    def update(self, state, target_pos, a, tau, dt):
+    def _init_previous_alphas(self, state, target_pos):
+        """
+        Вычисляет виртуальные управления для начального состояния,
+        принимая производные равными нулю, и сохраняет их как предыдущие.
+        """
+        x, z, vx, vz, theta, omega, I_L, I_R = state
+        target_x, target_z = target_pos
+
+        # Вертикальный канал
+        e_z1 = z - target_z
+        alpha_z1 = -self.k_z1 * e_z1
+        e_z2 = vz - alpha_z1
+        # dot{alpha_z1} = 0
+        alpha_z2 = (0.0 - e_z1 - self.k_z2 * e_z2) / self.a_s
+
+        # Горизонтальный канал
+        e_x1 = x - target_x
+        alpha_x1 = -self.k_x1 * e_x1
+        e_x2 = vx - alpha_x1
+        # dot{alpha_x1} = 0
+        alpha_x2 = (0.0 - e_x1 - self.k_x2 * e_x2) / self.g
+        alpha_x2 = np.clip(alpha_x2, -self.theta_lim, self.theta_lim)
+
+        e_x3 = theta - alpha_x2
+        # dot{alpha_x2} = 0
+        alpha_x3 = 0.0 - self.g * e_x2 - self.k_x3 * e_x3
+
+        e_x4 = omega - alpha_x3
+        # dot{alpha_x3} = 0
+        alpha_x4 = (0.0 - e_x3 - self.k_x4 * e_x4) / self.a_d
+
+        self._alpha_z1_prev = alpha_z1
+        self._alpha_z2_prev = alpha_z2
+        self._alpha_x1_prev = alpha_x1
+        self._alpha_x2_prev = alpha_x2
+        self._alpha_x3_prev = alpha_x3
+        self._alpha_x4_prev = alpha_x4
+
+    def update(self, state, target_pos, a_meas, tau_meas, dt):
         """
         state: (8,) [x, z, vx, vz, theta, omega, I_L, I_R]
-        target_pos: (2,) [x_des, z_des]
-        a: (2,) измеренное линейное ускорение [ax, az] (м/с²)
-        tau: float измеренный момент тангажа [Н·м]
-        dt: float шаг по времени
+        target_pos: (2,) [x*, z*]
+        a_meas, tau_meas: измеренные ускорение и момент (не используются в чистом backstepping)
+        dt: шаг по времени
         """
         if dt <= 0.0:
             self.last_lyapunov = None
@@ -225,77 +280,114 @@ class BacksteppingVelocityController:
         x, z, vx, vz, theta, omega, I_L, I_R = state
         target_x, target_z = target_pos
 
-        # ----- Позиционный контур (PD) -----
-        e_pos = np.array([target_x - x, target_z - z], dtype=float)
-        v_des = self.pos_kp * e_pos - self.pos_kd * np.array([vx, vz])
-        v_norm = np.linalg.norm(v_des)
-        if v_norm > self.v_max and v_norm > 0:
-            v_des = v_des * (self.v_max / v_norm)
+        # Отклонения токов от висения
+        i_L = I_L - self.I0
+        i_R = I_R - self.I0
+        i_s = i_L + i_R
+        i_d = i_R - i_L
 
-        # ----- Контур скорости (P) -----
-        e_v = v_des - np.array([vx, vz])
-        a_des = self.vel_kp * e_v
-        an = float(np.linalg.norm(a_des))
-        if an > self.a_lim and an > 0:
-            a_des = a_des * (self.a_lim / an)
+        # ------------------------------------------------------------------
+        # Вертикальный канал (z, v_z, i_s)
+        # ------------------------------------------------------------------
+        e_z1 = z - target_z
 
-        # Желаемая тяга и тангаж
-        T_des, theta_des = _allocate_thrust_pitch(self.m, self.g, a_des[0], a_des[1], self.theta_lim)
-        T_des = float(np.clip(T_des, 2.0 * self.k_F * self.I_min ** 2 + 1e-6, 2.0 * self.k_F * self.I_max ** 2))
+        alpha_z1 = -self.k_z1 * e_z1
+        alpha_z1_dot = (alpha_z1 - self._alpha_z1_prev) / dt
+        self._alpha_z1_prev = alpha_z1
 
-        # Производные желаемых величин
-        T_des_dot = (T_des - self._T_des_prev) / dt
-        theta_des_dot = (theta_des - self._theta_des_prev) / dt
-        self._T_des_prev = T_des
-        self._theta_des_prev = theta_des
+        e_z2 = vz - alpha_z1
 
-        # Контур тангажа
-        e_th = theta_des - theta
-        omega_des = self.k_theta * e_th + theta_des_dot
-        omega_des_dot = (omega_des - self._omega_des_prev) / dt
-        self._omega_des_prev = omega_des
+        alpha_z2 = (alpha_z1_dot - e_z1 - self.k_z2 * e_z2) / self.a_s
+        alpha_z2_dot = (alpha_z2 - self._alpha_z2_prev) / dt
+        self._alpha_z2_prev = alpha_z2
 
-        tau_ff = self.J * omega_des_dot
-        tau_fb = self.J * self.k_omega * (omega_des - omega)
-        tau_des = tau_ff + tau_fb
-        tau_des = (1.0 - self.k_tau_blend) * tau_des + self.k_tau_blend * tau
+        e_z3 = i_s - alpha_z2
 
-        # Желаемые токи
-        I_des = _inverse_motors(T_des, tau_des, self.L_arm, self.k_F, self.I_min, self.I_max)
+        u_s = i_s + self.tau_m * (alpha_z2_dot - self.a_s * e_z2 - self.k_z3 * e_z3)
 
-        I_des_dot = (I_des - self._I_des_prev) / dt
-        self._I_des_prev = I_des.copy()
+        # ------------------------------------------------------------------
+        # Горизонтальный канал (x, v_x, theta, omega, i_d)
+        # ------------------------------------------------------------------
+        e_x1 = x - target_x
 
-        # Вычисление Lyapunov-подобной функции
-        I = np.array([I_L, I_R], dtype=float)
-        e_I = I - I_des
-        e_om = omega_des - omega
-        c_th = self.m * self.g * 0.08
-        c_I = self.k_I * self.tau_m
-        V_vel = 0.5 * self.m * float(np.dot(e_v, e_v))
-        V_pitch = 0.5 * c_th * (e_th ** 2)
-        V_omega = 0.5 * self.J * (e_om ** 2)
-        V_curr = 0.5 * c_I * float(np.dot(e_I, e_I))
-        self.last_lyapunov = float(V_vel + V_pitch + V_omega + V_curr)
-        self.last_lyapunov_terms = {
-            'V_vel': V_vel,
-            'V_pitch': V_pitch,
-            'V_omega': V_omega,
-            'V_current': V_curr,
-        }
+        alpha_x1 = -self.k_x1 * e_x1
+        alpha_x1_dot = (alpha_x1 - self._alpha_x1_prev) / dt
+        self._alpha_x1_prev = alpha_x1
 
-        # Backstepping на динамику токов
-        I_cmd = I + self.tau_m * (I_des_dot - self.k_I * (I - I_des))
-        I_cmd = np.clip(I_cmd, self.I_min, self.I_max)
+        e_x2 = vx - alpha_x1
 
-        # Сохраняем желаемые значения для логирования
-        self._v_des = v_des.copy()
-        self._a_des = a_des.copy()
+        alpha_x2 = (alpha_x1_dot - e_x1 - self.k_x2 * e_x2) / self.g
+        alpha_x2 = np.clip(alpha_x2, -self.theta_lim, self.theta_lim)
+        alpha_x2_dot = (alpha_x2 - self._alpha_x2_prev) / dt
+        self._alpha_x2_prev = alpha_x2
+
+        e_x3 = theta - alpha_x2
+
+        alpha_x3 = alpha_x2_dot - self.g * e_x2 - self.k_x3 * e_x3
+        alpha_x3_dot = (alpha_x3 - self._alpha_x3_prev) / dt
+        self._alpha_x3_prev = alpha_x3
+
+        e_x4 = omega - alpha_x3
+
+        alpha_x4 = (alpha_x3_dot - e_x3 - self.k_x4 * e_x4) / self.a_d
+        alpha_x4_dot = (alpha_x4 - self._alpha_x4_prev) / dt
+        self._alpha_x4_prev = alpha_x4
+
+        e_x5 = i_d - alpha_x4
+
+        u_d = i_d + self.tau_m * (alpha_x4_dot - self.a_d * e_x4 - self.k_x5 * e_x5)
+
+        # ------------------------------------------------------------------
+        # Преобразование команд u_s, u_d в физические токи моторов
+        # ------------------------------------------------------------------
+        I_L_cmd = self.I0 + (u_s - u_d) / 2.0
+        I_R_cmd = self.I0 + (u_s + u_d) / 2.0
+        I_cmd = np.clip([I_L_cmd, I_R_cmd], self.I_min, self.I_max)
+
+        # ------------------------------------------------------------------
+        # Желаемые величины для логирования
+        # ------------------------------------------------------------------
+        # Желаемые скорости (виртуальные управления первого шага)
+        v_des = np.array([alpha_x1, alpha_z1], dtype=float)
+        theta_des = alpha_x2
+        omega_des = alpha_x3
+        i_s_des = alpha_z2
+        i_d_des = alpha_x4
+
+        # Желаемые физические токи моторов
+        I_L_des = self.I0 + (i_s_des - i_d_des) / 2.0
+        I_R_des = self.I0 + (i_s_des + i_d_des) / 2.0
+        I_des = np.array([I_L_des, I_R_des], dtype=float)
+        # Желаемый момент (из линеаризованного соотношения tau = J * a_d * i_d)
+        tau_des = self.J * self.a_d * i_d_des
+
+        # Сохраняем для get_desired()
+        self._v_des = v_des
         self._theta_des = theta_des
         self._omega_des = omega_des
-        self._T_des = T_des
+        self._I_des = I_des
         self._tau_des = tau_des
-        self._I_des = I_des.copy()
+
+        # ------------------------------------------------------------------
+        # Lyapunov-подобная функция
+        # ------------------------------------------------------------------
+        V_z = 0.5 * (e_z1**2 + e_z2**2 + e_z3**2)
+        V_x = 0.5 * (e_x1**2 + e_x2**2 + e_x3**2 + e_x4**2 + e_x5**2)
+        V_total = V_z + V_x
+
+        # Компоненты для диагностического графика
+        V_vel = 0.5 * (e_z2**2 + e_x2**2)          # ошибки скорости
+        V_pitch = 0.5 * e_x3**2                    # ошибка угла тангажа
+        V_omega = 0.5 * e_x4**2                    # ошибка угловой скорости
+        V_current = 0.5 * (e_z3**2 + e_x5**2)      # ошибки токов
+
+        self.last_lyapunov = float(V_total)
+        self.last_lyapunov_terms = {
+            'V_vel': float(V_vel),
+            'V_pitch': float(V_pitch),
+            'V_omega': float(V_omega),
+            'V_current': float(V_current),
+        }
 
         return I_cmd
 
@@ -303,12 +395,10 @@ class BacksteppingVelocityController:
         """Возвращает словарь желаемых величин, вычисленных на последнем шаге."""
         return {
             'v_des': self._v_des.copy(),
-            'a_des': self._a_des.copy(),
             'theta_des': self._theta_des,
             'omega_des': self._omega_des,
-            'T_des': self._T_des,
-            'tau_des': self._tau_des,
             'I_des': self._I_des.copy(),
+            'tau_des': self._tau_des,
         }
 
 
@@ -335,6 +425,7 @@ class _VelocityMotorCascadeBase:
         self._tau_des = 0.0
         self._T_des = 0.0
         self._I_des = np.array([0.0, 0.0], dtype=float)
+        self._theta_hat_prev = 0.0
 
     def reset(self, I_hover=None):
         self._theta_hat_prev = 0.0
