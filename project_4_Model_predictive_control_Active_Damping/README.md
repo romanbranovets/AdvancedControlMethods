@@ -209,9 +209,7 @@ At each control instant $t_k = k \Delta t_c$:
    $x_{d,k+1} = A_d x_{d,k} + B_d\, d(t_k)$.
 3. **Set the gradient** $f$ of the condensed QP using the precomputed $S_u^\top Q_\text{blk}$:
 
-   $$
-   f = S_u^\top Q_\text{blk}\, (S_x x_k + x_{\text{dist}} - r_{\text{stack}}).
-   $$
+   $f = S_u^\top Q_\text{blk}\, (S_x x_k + x_{\text{dist}} - r_{\text{stack}}).$
 
 4. **Solve the QP.** First try the analytic unconstrained minimum $u^\ast_{\text{unc}} = -H^{-1} f$. If $u^\ast_{\text{unc}}$ is feasible (lies within $[u_{\min}, u_{\max}]^N$), use it as-is. Otherwise polish by warm-started L-BFGS-B on the constrained problem, with an analytic gradient $H u + f$.
 5. **Apply** the first element $u_0$ and hold it (ZOH) until the next control instant.
@@ -276,17 +274,9 @@ For MPC with infinite-horizon terminal cost equal to the LQR cost-to-go $V_f(x) 
 
 All four conditions are checked on simulation data and visualised in `convergence_proof.png`:
 
-1. **Spectrum of the closed-loop matrix $A_d - B_d K$** lies strictly inside the unit disk:
+1. **Spectrum of the closed-loop matrix $A_d - B_d K$** lies strictly inside the unit disk: $\rho(A_d - B_d K) = 0.9572 < 1.$
 
-   $$
-   \rho(A_d - B_d K) = 0.9572 < 1.
-   $$
-
-2. **Theoretical decay rate** matches the observed state-norm envelope:
-
-   $$
-   \alpha = -\frac{\ln \rho}{\Delta t_c} = 0.874\ \text{s}^{-1}.
-   $$
+2. **Theoretical decay rate** matches the observed state-norm envelope: $\alpha = -\frac{\ln \rho}{\Delta t_c} = 0.874\ \text{s}^{-1}.$
 
 3. **Lyapunov function $V(x)$** decreases monotonically for MPC and LQR (straight line in log-scale).
 
