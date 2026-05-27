@@ -138,11 +138,10 @@ $$
 For sample time $\Delta t_c$, the discrete model is obtained via the matrix exponential of the augmented matrix:
 
 $$
+\begin{aligned}
 \begin{bmatrix} A_d & B_d \\\\ 0 & I \end{bmatrix}
-=
-\exp\left(
-\begin{bmatrix} A & B \\\\ 0 & 0 \end{bmatrix} \Delta t_c
-\right).
+&= \exp\left( \begin{bmatrix} A & B \\\\ 0 & 0 \end{bmatrix} \Delta t_c \right).
+\end{aligned}
 $$
 
 This gives an *exact* zero-order-hold model — no truncation error — which is then used both inside the MPC's prediction and as the reference for the convergence analysis.
