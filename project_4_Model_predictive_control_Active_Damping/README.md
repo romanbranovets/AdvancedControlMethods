@@ -153,7 +153,7 @@ $$
 J_\infty = \sum_{k=0}^{\infty} \left( x_k^\top Q x_k + u_k^\top R u_k \right),
 $$
 
-with $Q = \operatorname{diag}(300, 5, 30, 1) \succ 0$ and $R = 0.5 > 0$. The weights heavily penalise main-mass displacement $x_1$, moderately penalise its velocity, and lightly penalise absorber motion.
+with $Q = \mathrm{diag}(300, 5, 30, 1) \succ 0$ and $R = 0.5 > 0$. The weights heavily penalise main-mass displacement $x_1$, moderately penalise its velocity, and lightly penalise absorber motion.
 
 ### Discrete algebraic Riccati equation (DARE)
 
@@ -321,7 +321,7 @@ The frequency $f$ is chosen near the coupled-system resonance to make the reject
 ### Controller weights (MPC and LQR)
 
 $$
-Q = \operatorname{diag}(300, 5, 30, 1), \qquad R = 0.5.
+Q = \mathrm{diag}(300, 5, 30, 1), \qquad R = 0.5.
 $$
 
 ### PID gains
