@@ -1,19 +1,15 @@
 [project]
 name = "mpc-vibration-damping"
-version = "0.1.0"
-description = "Active vibration damping using MPC vs PID in 2D"
-readme = "README.md"
+version = "0.2.0"
+description = "Active vibration damping: rigorous MPC vs LQR vs PID convergence study"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "matplotlib>=3.7",
-    "plotly>=5.14",
+    "pillow>=10.0",
 ]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-[project.scripts]
-mpc-demo = "scripts.run_comparison:main"
