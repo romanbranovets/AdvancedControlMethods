@@ -90,7 +90,7 @@ State vector: $x = (x_1, x_2, v_1, v_2)^\top \in \mathbb{R}^4$.
 
 $$
 \begin{aligned}
-m_1 \dot v_1 &= -k_1 x_1 - c_1 v_1 + k_2 (x_2 - x_1) + c_2 (v_2 - v_1) + u + d(t),\\
+m_1 \dot v_1 &= -k_1 x_1 - c_1 v_1 + k_2 (x_2 - x_1) + c_2 (v_2 - v_1) + u + d(t),\\\\
 m_2 \dot v_2 &= -k_2 (x_2 - x_1) - c_2 (v_2 - v_1) - u.
 \end{aligned}
 $$
@@ -120,17 +120,17 @@ with
 $$
 A =
 \begin{bmatrix}
-0 & 0 & 1 & 0 \\
-0 & 0 & 0 & 1 \\
--\dfrac{k_1 + k_2}{m_1} & \dfrac{k_2}{m_1} & -\dfrac{c_1 + c_2}{m_1} & \dfrac{c_2}{m_1} \\
+0 & 0 & 1 & 0 \\\\
+0 & 0 & 0 & 1 \\\\
+-\dfrac{k_1 + k_2}{m_1} & \dfrac{k_2}{m_1} & -\dfrac{c_1 + c_2}{m_1} & \dfrac{c_2}{m_1} \\\\
 \dfrac{k_2}{m_2} & -\dfrac{k_2}{m_2} & \dfrac{c_2}{m_2} & -\dfrac{c_2}{m_2}
 \end{bmatrix},
 \quad
 B =
-\begin{bmatrix} 0 \\ 0 \\ \dfrac{1}{m_1} \\ -\dfrac{1}{m_2} \end{bmatrix},
+\begin{bmatrix} 0 \\\\ 0 \\\\ \dfrac{1}{m_1} \\\\ -\dfrac{1}{m_2} \end{bmatrix},
 \quad
 B_d =
-\begin{bmatrix} 0 \\ 0 \\ \dfrac{1}{m_1} \\ 0 \end{bmatrix}.
+\begin{bmatrix} 0 \\\\ 0 \\\\ \dfrac{1}{m_1} \\\\ 0 \end{bmatrix}.
 $$
 
 ### Exact ZOH discretisation
@@ -138,10 +138,10 @@ $$
 For sample time $\Delta t_c$, the discrete model is obtained via the matrix exponential of the augmented matrix:
 
 $$
-\begin{bmatrix} A_d & B_d \\ 0 & I \end{bmatrix}
+\begin{bmatrix} A_d & B_d \\\\ 0 & I \end{bmatrix}
 =
-\exp\!\left(
-\begin{bmatrix} A & B \\ 0 & 0 \end{bmatrix} \Delta t_c
+\exp\left(
+\begin{bmatrix} A & B \\\\ 0 & 0 \end{bmatrix} \Delta t_c
 \right).
 $$
 
